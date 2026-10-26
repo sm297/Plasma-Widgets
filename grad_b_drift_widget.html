@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Grad-B drift widget</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#0a1122;color:#e9f1ff}*{box-sizing:border-box}body{margin:0}.wrap{max-width:1400px;margin:auto;padding:16px}h1{font-size:1.5rem;margin:0 0 4px}p,.hint{color:#b4c4d8}p{margin:0 0 14px}.layout{display:grid;grid-template-columns:minmax(0,1fr) 315px;gap:12px}.views{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:12px}section,aside{background:#14223a;border:1px solid #344762;border-radius:12px;padding:12px;min-width:0}h2{font-size:1rem;margin:0 0 8px}canvas{display:block;width:100%;background:#0b1730;border-radius:7px}#scene{height:520px;touch-action:none;cursor:grab}#cross{height:390px}.hint{font-size:12px;margin:7px 0}.control{margin:12px 0}.control label{display:flex;justify-content:space-between;gap:8px}.value{color:#61d6ff;white-space:nowrap}input[type=range]{width:100%;accent-color:#61d6ff;margin-top:8px}button,select{background:#1b3654;color:#e9f1ff;border:1px solid #527395;border-radius:6px;padding:6px 10px;font:inherit}button{cursor:pointer;margin:4px 3px 0 0}select{width:100%;margin-top:8px}.readout{font-size:13px;line-height:1.8;margin-top:10px}.note{margin-top:14px;padding:10px;border-left:3px solid #ffcd6d;background:#101f35;font-size:13px;color:#cfdded}@media(max-width:1120px){.layout{grid-template-columns:1fr}}@media(max-width:720px){.views{grid-template-columns:1fr}#scene{height:410px}.wrap{padding:10px}}
+</style></head><body><div class="wrap"><h1>Grad-B drift</h1><p>A particle gyrates around straight magnetic field lines, drifting across them because the field is stronger on one side of its orbit.</p>
+<div class="layout"><div class="views"><section><h2>Rotatable 3D orbit</h2><canvas id="scene"></canvas><div class="hint">Drag to rotate · scroll to zoom. Blue: particle · pink: fading orbit · green: guiding centre · gold: magnetic field lines. Axial distance is compressed ×0.18 for display.</div></section><section><h2>View along +B (down the z axis)</h2><canvas id="cross"></canvas><div class="hint">Stronger B to the right (+x). Positive charges drift up (+y); electrons drift down (−y).</div><div id="readout" class="readout"></div></section></div>
+<aside><h2>Particle and field</h2>
+<div class="control"><label for="field">Field B at centre <span id="fieldVal" class="value"></span></label><input id="field" type="range" min="0.2" max="5" step="0.1" value="1"></div>
+<div class="control"><label for="gradient">Gradient scale L<sub>B</sub> = B/|∇B| <span id="gradientVal" class="value"></span></label><input id="gradient" type="range" min="0.3" max="5" step="0.1" value="2"></div>
+<div class="control"><label for="vperp">Gyration speed v⊥ <span id="vperpVal" class="value"></span></label><input id="vperp" type="range" min="0" max="10" step="0.1" value="4"></div>
+<div class="control"><label for="vpar">Parallel velocity v∥ <span id="vparVal" class="value"></span></label><input id="vpar" type="range" min="-10" max="10" step="0.1" value="1"></div>
+<div class="control"><label for="species">Species</label><select id="species"><option value="electron">Electron (−)</option><option value="proton">Proton (+)</option><option value="deuteron" selected>Deuteron (+)</option></select></div>
+<h2>Display</h2><div class="control"><label for="magnify">Drift display magnification <span id="magnifyVal" class="value"></span></label><input id="magnify" type="range" min="1" max="12" step="1" value="2"></div>
+<div class="control"><label for="persistence">Trail persistence <span id="persistenceVal" class="value"></span></label><input id="persistence" type="range" min="1" max="100" step="1" value="75"></div>
+<div class="control"><label for="speed">Animation speed <span id="speedVal" class="value"></span></label><input id="speed" type="range" min="0.25" max="5" step="0.25" value="1.5"></div>
+<button id="pause">Pause</button><button id="resetPath">Reset path</button><button id="resetView">Reset view</button>
+<div class="note">Local guiding-centre model: B(x) ≈ B₀(1 + x/L<sub>B</sub>) along +z. The lines are straight (zero curvature), while ∇B points along +x. The drawn helix uses a constant gyrofrequency evaluated at the centre plus the calculated grad-B guiding-centre drift; it is not an exact Lorentz-force orbit. Best when ρ/L<sub>B</sub> ≪ 1. Magnification and axial compression affect only the drawing.</div>
+</aside></div></div>
+<script>
+(function(){'use strict';
+const $=id=>document.getElementById(id),canvas=$('scene'),cross=$('cross'),g=canvas.getContext('2d'),h=cross.getContext('2d');
+const ids=['field','gradient','vperp','vpar','species','magnify','persistence','speed'],c={};ids.forEach(id=>c[id]=$(id));
+const pi=Math.PI,tau=2*pi,stop=24*tau,sample=0.045,e=1.602176634e-19,axial=0.18;
+const masses={electron:9.1093837139e-31,proton:1.67262192369e-27,deuteron:3.3435837724e-27};
+let phase=0,trail=[0],nextSample=sample,last=null,paused=false,yaw=-0.65,tilt=0.48,zoom=1,drag=null;
+function physics(){
+ const m=masses[c.species.value],q=(c.species.value==='electron'?-1:1)*e,B=+c.field.value,L=+c.gradient.value,vp=+c.vperp.value*1e6,vz=+c.vpar.value*1e6,omega=e*B/m;
+ return {m,q,B,L,vp,vz,omega,rho:vp/omega,drift:m*vp*vp/(2*q*B*L),mag:+c.magnify.value,sgn:Math.sign(q)};
+}
+// B along +z, grad B along +x: B × grad B along +y.
+function centre(t,p){return {x:0,y:p.mag*p.drift*t/p.omega,z:axial*p.vz*t/p.omega};}
+function orbit(t,p){const gc=centre(t,p);return {x:p.rho*Math.cos(t),y:gc.y-p.sgn*p.rho*Math.sin(t),z:gc.z};}
+function fmt(v,unit){if(v===0)return '0 '+unit;let a=Math.abs(v),n=v,p='';if(a>=1e6){n/=1e6;p='M';}else if(a>=1e3){n/=1e3;p='k';}else if(a<1e-9)return v.toExponential(2)+' '+unit;else if(a<1e-6){n*=1e9;p='n';}else if(a<1e-3){n*=1e6;p='μ';}else if(a<1){n*=1e3;p='m';}return n.toPrecision(3)+' '+p+unit;}
+function readout(p){
+ $('fieldVal').textContent=p.B.toFixed(1)+' T';$('gradientVal').textContent=p.L.toFixed(1)+' m';$('vperpVal').textContent=(p.vp/1e6).toFixed(1)+' Mm/s';$('vparVal').textContent=(p.vz/1e6).toFixed(1)+' Mm/s';
+ $('magnifyVal').textContent=p.mag+'×';$('persistenceVal').textContent=+c.persistence.value===100?'Full':c.persistence.value+'%';$('speedVal').textContent=(+c.speed.value).toFixed(2)+'×';
+ const warning=p.rho/p.L>0.2?'<br><span style="color:#ffcd6d">Caution: ρ/L<sub>B</sub> is not small; the local drift approximation may be inaccurate.</span>':'';
+ $('readout').innerHTML='Grad-B drift = <b>'+fmt(p.drift,'m/s')+' '+(p.drift>0?'(+y)':p.drift<0?'(−y)':'')+'</b><br>Displacement per gyroperiod = <b>'+fmt(p.drift*tau/p.omega,'m')+'</b><br>Gyroradius ρ = <b>'+fmt(p.rho,'m')+'</b><br>Gyroperiod = <b>'+fmt(tau/p.omega,'s')+'</b><br>ρ/L<sub>B</sub> = <b>'+(p.rho/p.L).toPrecision(2)+'</b>'+warning;
+}
+function size(el,ctx){const r=el.getBoundingClientRect(),d=Math.min(2,window.devicePixelRatio||1),w=Math.max(1,Math.round(r.width*d)),hh=Math.max(1,Math.round(r.height*d));if(el.width!==w||el.height!==hh){el.width=w;el.height=hh;}ctx.setTransform(d,0,0,d,0,0);return {w:r.width,h:r.height};}
+function viewBox(p){const end=centre(stop,p),r=Math.max(p.rho,0.012*p.L);return {x:r*1.9,y:Math.max(r*2,Math.abs(end.y)*0.5+r*1.45),z:Math.max(r*1.9,Math.abs(end.z)*0.5+r*1.45),my:end.y*0.5,mz:end.z*0.5};}
+function project(w,hh,p){const box=viewBox(p),cy=Math.cos(yaw),sy=Math.sin(yaw),ct=Math.cos(tilt),st=Math.sin(tilt);
+ function raw(v){const a=cy*v.x-sy*(v.y-box.my),b=sy*v.x+cy*(v.y-box.my);return {x:a,y:ct*b-st*(v.z-box.mz)};}
+ const corners=[];for(const x of [-box.x,box.x])for(const y of [-box.y,box.y])for(const z of [-box.z,box.z])corners.push(raw({x,y:y+box.my,z:z+box.mz}));
+ const loX=Math.min(...corners.map(a=>a.x)),hiX=Math.max(...corners.map(a=>a.x)),loY=Math.min(...corners.map(a=>a.y)),hiY=Math.max(...corners.map(a=>a.y));
+ const scale=Math.min(w*.87/Math.max(hiX-loX,1e-12),hh*.86/Math.max(hiY-loY,1e-12))*zoom;
+ return v=>{const a=raw(v);return {x:w/2+(a.x-(loX+hiX)/2)*scale,y:hh/2-(a.y-(loY+hiY)/2)*scale};};
+}
+function crossProject(w,hh,p){const end=centre(stop,p),extentX=Math.max(2.1*p.rho,0.06*p.L),extentY=Math.max(2.1*p.rho,Math.abs(end.y)/2+1.5*p.rho,0.06*p.L),scale=Math.min(w*.40/extentX,hh*.40/extentY);return v=>({x:w/2+v.x*scale,y:hh/2-(v.y-end.y/2)*scale});}
+function line(ctx,pts,color,width,dash){if(pts.length<2)return;ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);for(let i=1;i<pts.length;i++)ctx.lineTo(pts[i].x,pts[i].y);ctx.strokeStyle=color;ctx.lineWidth=width;ctx.setLineDash(dash||[]);ctx.stroke();ctx.setLineDash([]);}
+function dot(ctx,v,color,r){ctx.beginPath();ctx.arc(v.x,v.y,r,0,tau);ctx.shadowColor=color;ctx.shadowBlur=12;ctx.fillStyle=color;ctx.fill();ctx.shadowBlur=0;}
+function arrow(ctx,a,b,color){line(ctx,[a,b],color,2);const d=Math.atan2(b.y-a.y,b.x-a.x),r=9;line(ctx,[{x:b.x-r*Math.cos(d-0.5),y:b.y-r*Math.sin(d-0.5)},b,{x:b.x-r*Math.cos(d+0.5),y:b.y-r*Math.sin(d+0.5)}],color,2);}
+function visible(){if(+c.persistence.value===100)return trail;const age=(0.10+ +c.persistence.value*0.16)*tau;let i=0;while(i<trail.length-1&&phase-trail[i]>age)i++;return trail.slice(Math.max(0,i-1));}
+function fade(ctx,ts,P){const n=ts.length-1;if(n<1)return;const bands=Math.min(44,n);for(let b=0;b<bands;b++){const lo=Math.floor(n*b/bands),hi=Math.floor(n*(b+1)/bands);if(hi>lo)line(ctx,ts.slice(lo,hi+1).map(P),'rgba(255,140,191,'+(0.06+0.88*Math.pow((b+0.5)/bands,1.5))+')',2.5);}}
+function drawScene(p){
+ const sz=size(canvas,g),w=sz.w,hh=sz.h;g.clearRect(0,0,w,hh);const P=project(w,hh,p),box=viewBox(p),zmin=box.mz-box.z*.76,zmax=box.mz+box.z*.76;
+ for(const xx of [-1.35,-.65,0,.65,1.35]){const x=xx*Math.max(p.rho,.045*p.L),base={x,y:box.my*.05,z:zmin},top={x,y:box.my*.05,z:zmax};line(g,[P(base),P(top)],'rgba(255,205,109,'+(0.34+xx*.08)+')',Math.max(1,1.5+xx*.3));arrow(g,P({x,y:box.my*.05,z:zmax*.30+zmin*.70}),P({x,y:box.my*.05,z:zmax*.45+zmin*.55}),'rgba(255,205,109,.7)');}
+ const guide=[];for(let i=0;i<=230;i++)guide.push(P(centre(stop*i/230,p)));line(g,guide,'rgba(131,230,189,.8)',2,[5,5]);
+ const o=P({x:0,y:0,z:zmin}),grad=P({x:Math.max(p.rho,.10*p.L),y:0,z:zmin}),b=P({x:0,y:0,z:zmin+box.z*.38}),d=P({x:0,y:Math.sign(p.drift)*box.y*.36,z:zmin});arrow(g,o,grad,'#ffcd6d');arrow(g,o,b,'#ffcd6d');if(p.drift)arrow(g,o,d,'#83e6bd');g.font='bold 13px system-ui';g.fillStyle='#ffcd6d';g.fillText('∇B',grad.x+4,grad.y-4);g.fillText('B',b.x+4,b.y-4);if(p.drift){g.fillStyle='#83e6bd';g.fillText('v∇B',d.x+4,d.y-4);}
+ fade(g,visible(),t=>P(orbit(t,p)));dot(g,P(centre(phase,p)),'#83e6bd',3.5);dot(g,P(orbit(phase,p)),'#61d6ff',6);
+}
+function drawCross(p){
+ const sz=size(cross,h),w=sz.w,hh=sz.h;h.clearRect(0,0,w,hh);const P=crossProject(w,hh,p),end=centre(stop,p),guide=[];
+ for(let i=0;i<=160;i++)guide.push(P(centre(stop*i/160,p)));line(h,guide,'rgba(131,230,189,.8)',2,[5,5]);
+ fade(h,visible(),t=>P(orbit(t,p)));dot(h,P(centre(phase,p)),'#83e6bd',4);dot(h,P(orbit(phase,p)),'#61d6ff',6);
+ h.font='bold 13px system-ui';h.fillStyle='#ffcd6d';h.fillText('weak B    ∇B →    strong B',12,24);h.fillStyle='#83e6bd';h.fillText(p.drift>0?'grad-B drift ↑ +y':p.drift<0?'grad-B drift ↓ −y':'grad-B drift = 0',12,46);
+}
+function redraw(){const p=physics();readout(p);drawScene(p);drawCross(p);}function reset(){phase=0;trail=[0];nextSample=sample;redraw();}
+ids.forEach(id=>c[id].addEventListener('input',()=>{if(['field','gradient','vperp','vpar','species','magnify'].includes(id))reset();else redraw();}));
+$('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'Play':'Pause';};$('resetPath').onclick=reset;$('resetView').onclick=()=>{yaw=-0.65;tilt=0.48;zoom=1;redraw();};
+canvas.addEventListener('pointerdown',ev=>{drag={x:ev.clientX,y:ev.clientY};canvas.setPointerCapture(ev.pointerId);});canvas.addEventListener('pointermove',ev=>{if(!drag)return;yaw+=(ev.clientX-drag.x)*.009;tilt=Math.max(-1.48,Math.min(1.48,tilt+(ev.clientY-drag.y)*.009));drag={x:ev.clientX,y:ev.clientY};redraw();});canvas.addEventListener('pointerup',()=>drag=null);canvas.addEventListener('pointercancel',()=>drag=null);canvas.addEventListener('wheel',ev=>{ev.preventDefault();zoom=Math.max(.5,Math.min(4,zoom*Math.exp(-ev.deltaY*.001)));redraw();},{passive:false});
+function frame(now){const dt=last===null?0:Math.min(.06,(now-last)/1000);last=now;if(!paused){let n=phase+dt*(+c.speed.value)*6;if(n>=stop){n=n%stop;trail=[0];nextSample=sample;}phase=n;while(nextSample<=phase){trail.push(nextSample);nextSample+=sample;}}redraw();requestAnimationFrame(frame);}reset();requestAnimationFrame(frame);
+})();
+</script></body></html>

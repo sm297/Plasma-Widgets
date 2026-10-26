@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>E × B drift widget</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#0a1122;color:#e9f1ff}*{box-sizing:border-box}body{margin:0}.wrap{max-width:1400px;margin:auto;padding:16px}h1{font-size:1.5rem;margin:0 0 4px}p,.hint{color:#b4c4d8}p{margin:0 0 14px}.layout{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:12px}.views{display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:12px}section,aside{background:#14223a;border:1px solid #344762;border-radius:12px;padding:12px;min-width:0}h2{font-size:1rem;margin:0 0 8px}canvas{display:block;width:100%;background:#0b1730;border-radius:7px}#scene{height:520px;touch-action:none;cursor:grab}#cross{height:375px}.hint{font-size:12px;margin:7px 0}.control{margin:13px 0}.control label{display:flex;justify-content:space-between;gap:8px}.value{color:#61d6ff;white-space:nowrap}input[type=range]{width:100%;accent-color:#61d6ff;margin-top:8px}button,select{background:#1b3654;color:#e9f1ff;border:1px solid #527395;border-radius:6px;padding:6px 10px;font:inherit}button{cursor:pointer;margin:4px 3px 0 0}select{width:100%;margin-top:8px}.readout{font-size:13px;line-height:1.85;margin-top:10px}.note{margin-top:14px;padding:10px;border-left:3px solid #ffcd6d;background:#101f35;font-size:13px;color:#cfdded}@media(max-width:1120px){.layout{grid-template-columns:1fr}}@media(max-width:720px){.views{grid-template-columns:1fr}#scene{height:410px}.wrap{padding:10px}}
+</style></head><body><div class="wrap"><h1>E × B drift</h1><p>A particle gyrates about a magnetic field while its guiding centre drifts perpendicular to both fields.</p>
+<div class="layout"><div class="views"><section><h2>Rotatable 3D trajectory</h2><canvas id="scene"></canvas><div class="hint">Drag to rotate · scroll to zoom. Blue: particle · pink: fading trail · green: guiding centre.</div></section><section><h2>Looking along +B</h2><canvas id="cross"></canvas><div id="readout" class="readout"></div><div class="hint">⊙ B points toward you; +E points right; E × B points down.</div></section></div>
+<aside><h2>Particle and display</h2>
+<div class="control"><label for="field">Magnetic field B <span id="fieldVal" class="value"></span></label><input id="field" type="range" min="0.2" max="5" step="0.1" value="2"></div>
+<div class="control"><label for="electric">Electric field E <span id="electricVal" class="value"></span></label><input id="electric" type="range" min="-4" max="4" step="0.1" value="1.2"></div>
+<div class="control"><label for="vperp">Gyration speed v⊥ <span id="vperpVal" class="value"></span></label><input id="vperp" type="range" min="0" max="10" step="0.1" value="4"></div>
+<div class="control"><label for="vpar">Parallel velocity v∥ <span id="vparVal" class="value"></span></label><input id="vpar" type="range" min="-10" max="10" step="0.1" value="1"></div>
+<div class="control"><label for="species">Species</label><select id="species"><option value="electron">Electron (−)</option><option value="proton">Proton (+)</option><option value="deuteron" selected>Deuteron (+)</option></select></div>
+<div class="control"><label for="persistence">Trail persistence <span id="persistenceVal" class="value"></span></label><input id="persistence" type="range" min="1" max="100" value="55"></div>
+<div class="control"><label for="speed">Animation speed <span id="speedVal" class="value"></span></label><input id="speed" type="range" min="0.25" max="5" step="0.25" value="1.5"></div>
+<button id="pause">Pause</button><button id="resetPath">Reset path</button><button id="resetView">Reset view</button>
+<div class="note">Uniform perpendicular fields: B = B ẑ and E = E x̂. The guiding centre drifts at v<sub>E×B</sub> = E × B/B² = −(E/B) ŷ, independently of particle species. Length ratios are physical; animation playback time is illustrative. The electric field can change instantaneous kinetic energy during gyration.</div>
+</aside></div></div>
+<script>
+(function(){
+'use strict';
+var byId=function(id){return document.getElementById(id);};
+var scene=byId('scene'),cross=byId('cross'),ctx=scene.getContext('2d'),cx=cross.getContext('2d');
+var c={},names=['field','electric','vperp','vpar','species','persistence','speed'];
+names.forEach(function(id){c[id]=byId(id);});
+var tau=2*Math.PI,end=3*tau,step=0.03,e=1.602176634e-19;
+var masses={electron:9.1093837139e-31,proton:1.67262192369e-27,deuteron:3.3435837724e-27};
+var phase=0,trail=[0],nextSample=step,paused=false,last=null;
+var yaw=-0.7,tilt=0.5,zoom=1,drag=null;
+var reference=masses.deuteron*4e6/(e*2);
+function physics(){
+ var mass=masses[c.species.value],sign=c.species.value==='electron'?-1:1;
+ var B=Number(c.field.value),E=Number(c.electric.value)*1e6;
+ var vp=Number(c.vperp.value)*1e6,vz=Number(c.vpar.value)*1e6;
+ var omega=e*B/mass;
+ return {sign:sign,B:B,E:E,vp:vp,vz:vz,omega:omega,period:tau/omega,radius:vp/omega,drift:-E/B};
+}
+// Phase is |q|Bt/m. The initial perpendicular velocity is along +x.
+function position(t,p){return {x:p.radius*Math.sin(t),y:p.sign*p.radius*(Math.cos(t)-1)+p.drift*t/p.omega,z:p.vz*t/p.omega};}
+function centre(t,p){return {x:0,y:-p.sign*p.radius+p.drift*t/p.omega,z:p.vz*t/p.omega};}
+function fmt(v,unit){
+ if(v===0)return '0 '+unit;
+ var a=Math.abs(v),prefix='';
+ if(a>=1e6){v/=1e6;prefix='M';}
+ else if(a>=1e3){v/=1e3;prefix='k';}
+ else if(a<1e-9)return v.toExponential(2)+' '+unit;
+ else if(a<1e-6){v*=1e9;prefix='n';}
+ else if(a<1e-3){v*=1e6;prefix='μ';}
+ else if(a<1){v*=1e3;prefix='m';}
+ return v.toPrecision(3)+' '+prefix+unit;
+}
+function readout(p){
+ byId('fieldVal').textContent=p.B.toFixed(1)+' T';
+ byId('electricVal').textContent=(p.E/1e6).toFixed(1)+' MV/m';
+ byId('vperpVal').textContent=(p.vp/1e6).toFixed(1)+' Mm/s';
+ byId('vparVal').textContent=(p.vz/1e6).toFixed(1)+' Mm/s';
+ byId('persistenceVal').textContent=Number(c.persistence.value)===100?'Full':c.persistence.value+'%';
+ byId('speedVal').textContent=Number(c.speed.value).toFixed(2)+'×';
+ byId('readout').innerHTML='E × B drift v<sub>d</sub> = <b>'+fmt(p.drift,'m/s')+' along y</b><br>Drift per turn = <b>'+fmt(p.drift*p.period,'m')+'</b><br>Gyro radius ρ = <b>'+fmt(p.radius,'m')+'</b><br>Gyroperiod T = <b>'+fmt(p.period,'s')+'</b><br>Gyrofrequency f = <b>'+fmt(1/p.period,'Hz')+'</b><br>Distance along B per turn = <b>'+fmt(p.vz*p.period,'m')+'</b><br>Electric work since start = <b>'+fmt(p.sign*p.E*position(phase,p).x,'eV')+'</b>';
+}
+function size(canvas,g){
+ var r=canvas.getBoundingClientRect(),ratio=Math.min(2,window.devicePixelRatio||1);
+ var w=Math.max(1,Math.round(r.width*ratio)),h=Math.max(1,Math.round(r.height*ratio));
+ if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}
+ g.setTransform(ratio,0,0,ratio,0,0);
+ return {w:r.width,h:r.height};
+}
+function projection(w,h,p){
+ var cy=Math.cos(yaw),sy=Math.sin(yaw),ct=Math.cos(tilt),st=Math.sin(tilt);
+ function raw(v){var x=cy*v.x-sy*v.y,y=sy*v.x+cy*v.y;return {x:x,y:ct*v.z-st*y};}
+ var mid=raw(centre(end/2,p)),maxX=reference,maxY=reference;
+ for(var i=0;i<=180;i++){
+  var a=raw(position(end*i/180,p));
+  maxX=Math.max(maxX,Math.abs(a.x-mid.x));
+  maxY=Math.max(maxY,Math.abs(a.y-mid.y));
+ }
+ var scale=Math.min(Math.min(w/7,h/11)/reference,w*0.43/maxX,h*0.43/maxY)*zoom;
+ return function(v){var a=raw(v);return {x:w/2+(a.x-mid.x)*scale,y:h/2-(a.y-mid.y)*scale};};
+}
+function endProjection(w,h,p){
+ var mid=centre(end/2,p),spread=p.radius+Math.abs(p.drift)*end/(2*p.omega);
+ var scale=Math.min(Math.min(w,h)*0.18/reference,w*0.42/Math.max(reference,p.radius),h*0.39/Math.max(reference,spread));
+ return function(v){return {x:w/2+v.x*scale,y:h/2-(v.y-mid.y)*scale};};
+}
+function path(g,pts,color,width,dash){
+ if(pts.length<2)return;
+ g.beginPath();g.moveTo(pts[0].x,pts[0].y);
+ for(var i=1;i<pts.length;i++)g.lineTo(pts[i].x,pts[i].y);
+ g.strokeStyle=color;g.lineWidth=width||1;g.setLineDash(dash||[]);g.stroke();g.setLineDash([]);
+}
+function dot(g,v,color,r){g.beginPath();g.arc(v.x,v.y,r,0,tau);g.fillStyle=color;g.shadowColor=color;g.shadowBlur=12;g.fill();g.shadowBlur=0;}
+function arrow(g,a,b,color){
+ path(g,[a,b],color,2);
+ var t=Math.atan2(b.y-a.y,b.x-a.x),L=9;
+ path(g,[{x:b.x-L*Math.cos(t-0.55),y:b.y-L*Math.sin(t-0.55)},b,{x:b.x-L*Math.cos(t+0.55),y:b.y-L*Math.sin(t+0.55)}],color,2);
+}
+function visible(){
+ if(Number(c.persistence.value)===100)return trail;
+ var age=(0.12+Number(c.persistence.value)*0.058)*tau,i=0;
+ while(i<trail.length-1&&phase-trail[i]>age)i++;
+ return trail.slice(Math.max(0,i-1));
+}
+function fade(g,angles,P,p){
+ var n=angles.length-1;if(n<1)return;
+ var bands=Math.min(36,n);
+ for(var b=0;b<bands;b++){
+  var lo=Math.floor(n*b/bands),hi=Math.floor(n*(b+1)/bands);
+  if(hi<=lo)continue;
+  var pts=angles.slice(lo,hi+1).map(function(t){return P(position(t,p));});
+  path(g,pts,'rgba(255,136,192,'+(0.05+0.9*Math.pow((b+0.5)/bands,1.5))+')',2.7);
+ }
+}
+function drawScene(p){
+ var s=size(scene,ctx),w=s.w,h=s.h;ctx.clearRect(0,0,w,h);
+ var P=projection(w,h,p),orbit=[],guide=[];
+ for(var i=0;i<=270;i++){var t=end*i/270;orbit.push(P(position(t,p)));guide.push(P(centre(t,p)));}
+ path(ctx,orbit,'rgba(115,162,204,.28)',1,[4,6]);
+ path(ctx,guide,'rgba(131,230,189,.8)',2,[5,5]);
+ var origin=centre(end/2,p),o=P(origin),L=reference*1.4;
+ var b=P({x:origin.x,y:origin.y,z:origin.z+L});arrow(ctx,o,b,'#ffcd6d');
+ ctx.font='bold 13px system-ui';ctx.fillStyle='#ffcd6d';ctx.fillText('B',b.x+5,b.y-4);
+ if(p.E){var ep=P({x:origin.x+Math.sign(p.E)*L,y:origin.y,z:origin.z});arrow(ctx,o,ep,'#ffcd6d');ctx.fillText('E',ep.x+5,ep.y-4);}
+ if(p.drift){var d=P({x:origin.x,y:origin.y+Math.sign(p.drift)*L,z:origin.z});arrow(ctx,o,d,'#83e6bd');ctx.fillStyle='#83e6bd';ctx.fillText('E × B',d.x+5,d.y-4);}
+ fade(ctx,visible(),P,p);dot(ctx,P(position(phase,p)),'#61d6ff',6);
+}
+function drawCross(p){
+ var s=size(cross,cx),w=s.w,h=s.h;cx.clearRect(0,0,w,h);
+ var P=endProjection(w,h,p),orbit=[],guide=[];
+ for(var i=0;i<=270;i++){var t=end*i/270;orbit.push(P(position(t,p)));guide.push(P(centre(t,p)));}
+ path(cx,orbit,'rgba(115,162,204,.28)',1,[4,6]);path(cx,guide,'rgba(131,230,189,.8)',2,[5,5]);
+ fade(cx,visible(),P,p);dot(cx,P(centre(phase,p)),'#83e6bd',3);dot(cx,P(position(phase,p)),'#61d6ff',6);
+ cx.font='bold 15px system-ui';cx.fillStyle='#ffcd6d';cx.fillText('⊙ B',12,25);cx.fillText(p.E>=0?'E →':'E ←',12,48);
+ cx.fillStyle='#83e6bd';cx.fillText(p.drift<0?'E × B ↓':p.drift>0?'E × B ↑':'E × B = 0',12,70);
+}
+function redraw(){var p=physics();readout(p);drawScene(p);drawCross(p);}
+function reset(){phase=0;trail=[0];nextSample=step;redraw();}
+names.forEach(function(id){c[id].addEventListener('input',function(){
+ if(id==='species')reference=masses[c.species.value]*4e6/(e*2);
+ if(['field','electric','vperp','vpar','species'].indexOf(id)>=0)reset();else redraw();
+});});
+byId('pause').onclick=function(){paused=!paused;byId('pause').textContent=paused?'Play':'Pause';};
+byId('resetPath').onclick=reset;
+byId('resetView').onclick=function(){yaw=-0.7;tilt=0.5;zoom=1;redraw();};
+scene.addEventListener('pointerdown',function(ev){drag={x:ev.clientX,y:ev.clientY};scene.setPointerCapture(ev.pointerId);});
+scene.addEventListener('pointermove',function(ev){if(!drag)return;yaw+=(ev.clientX-drag.x)*0.009;tilt=Math.max(-1.48,Math.min(1.48,tilt+(ev.clientY-drag.y)*0.009));drag={x:ev.clientX,y:ev.clientY};redraw();});
+scene.addEventListener('pointerup',function(){drag=null;});scene.addEventListener('pointercancel',function(){drag=null;});
+scene.addEventListener('wheel',function(ev){ev.preventDefault();zoom=Math.max(0.5,Math.min(4,zoom*Math.exp(-ev.deltaY*0.001)));redraw();},{passive:false});
+function frame(now){
+ var dt=last===null?0:Math.min(0.06,(now-last)/1000);last=now;
+ if(!paused){
+  var next=phase+dt*Number(c.speed.value)*3.7;
+  if(next>=end){next=next%end;trail=[0];nextSample=step;}
+  phase=next;
+  while(nextSample<=phase){trail.push(nextSample);nextSample+=step;}
+ }
+ redraw();requestAnimationFrame(frame);
+}
+reset();requestAnimationFrame(frame);
+})();
+</script></body></html>

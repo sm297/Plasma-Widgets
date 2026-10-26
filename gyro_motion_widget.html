@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Charged-particle gyromotion</title>
+<style>
+:root{color-scheme:dark;--bg:#0a1122;--panel:#14223a;--line:#344762;--text:#e9f1ff;--muted:#b0bed1;--blue:#61d6ff;--pink:#ff88c0;--gold:#ffcd6d}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}.wrap{max-width:1420px;margin:auto;padding:16px}h1{font-size:1.45rem;margin:0 0 4px}p{margin:4px 0 12px;color:var(--muted)}.grid{display:grid;grid-template-columns:minmax(390px,1fr) 310px;gap:14px}.visuals{display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:12px}section,.controls{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;min-width:0}h2{font-size:1rem;margin:0 0 7px}canvas{width:100%;display:block;border-radius:7px;background:#0b1730}#scene{height:540px;touch-action:none;cursor:grab}#scene:active{cursor:grabbing}#cross{height:370px}.badge{color:var(--gold);font-weight:700}#readout{line-height:1.75;margin:10px 0 0;font-size:13px}.hint{font-size:12px;color:var(--muted);margin:7px 0 0}.control{margin:12px 0 17px}.control label{display:flex;justify-content:space-between;gap:8px}.value{color:var(--blue);white-space:nowrap}input[type=range]{width:100%;accent-color:var(--blue);margin:8px 0 0}select,button{background:#1b3654;color:var(--text);border:1px solid #527395;border-radius:6px;padding:6px 10px;font:inherit}select{width:100%;margin-top:6px}button{cursor:pointer;margin:5px 5px 0 0}button:hover{background:#255072}.legend{font-size:13px;color:var(--muted);margin-top:8px}.a{color:var(--blue)}.b{color:var(--pink)}.c{color:var(--gold)}.note{margin-top:12px;padding:11px 14px;background:#101f35;border-left:3px solid var(--gold);border-radius:5px;color:#cfdded;font-size:13px}@media(max-width:1120px){.grid{grid-template-columns:1fr}}@media(max-width:720px){.visuals{grid-template-columns:1fr}#scene{height:440px}#cross{height:330px}.wrap{padding:10px}}
+</style></head><body><div class="wrap">
+<h1>Gyromotion in a uniform magnetic field</h1><p>A charged particle circles around a magnetic field line while its parallel velocity carries it along the field. Change the physics controls to see how the helix responds.</p>
+<div class="grid"><div class="visuals"><section><h2>3D particle path <span class="badge" id="state"></span></h2><canvas id="scene" aria-label="Rotatable three-dimensional charged-particle helix"></canvas><div class="legend"><span class="a">●</span> particle &nbsp; <span class="b">—</span> orbit trail &nbsp; <span class="c">—</span> magnetic field line</div><div class="hint">Drag to rotate · scroll to zoom. Orbit dimensions use a fixed physical scale for each species; the view zooms out only if needed to fit a large orbit.</div></section><section><h2>Looking along the field</h2><canvas id="cross" aria-label="Gyromotion viewed along the magnetic-field direction"></canvas><div id="readout" aria-live="polite"></div><div class="hint">The field points out of the screen in this view. The displayed rotation direction changes with charge sign, not with particle mass.</div></section></div>
+<div class="controls"><h2>Particle and display</h2>
+<div class="control"><label for="vperp">Perpendicular speed v⊥ <span class="value" id="vperpVal"></span></label><input id="vperp" type="range" min="0" max="10" step="0.1" value="4"><div class="hint">Controls the gyro-orbit radius; zero gives motion along B only.</div></div>
+<div class="control"><label for="field">Magnetic field B <span class="value" id="fieldVal"></span></label><input id="field" type="range" min="0.1" max="8" step="0.1" value="2"></div>
+<div class="control"><label for="vpar">Parallel velocity v∥ <span class="value" id="vparVal"></span></label><input id="vpar" type="range" min="-10" max="10" step="0.1" value="1"><div class="hint">Negative: against B · zero: circular orbit · positive: along B.</div></div>
+<div class="control"><label for="species">Particle species</label><select id="species"><option value="electron">Electron (−)</option><option value="proton">Proton (+)</option><option value="deuteron" selected>Deuteron (+)</option></select></div>
+<div class="control"><label for="persistence">Trail persistence <span class="value" id="persistenceVal"></span></label><input id="persistence" type="range" min="1" max="100" step="1" value="38"></div>
+<div class="control"><label for="speed">Animation speed <span class="value" id="speedVal"></span></label><input id="speed" type="range" min="0.25" max="5" step="0.25" value="1.5"></div>
+<button id="pause">Pause</button><button id="resetPath">Reset path</button><button id="resetView">Reset view</button>
+<div class="note"><strong>Uniform-field teaching model.</strong> The sliders set v⊥ and signed v∥ directly (in millions of metres per second). The helix radius is ρ = γmv⊥/(|q|B), and its advance per turn is v∥T. Both dimensions use the same spatial scale, held fixed as you adjust velocities and B unless the orbit would leave the frame. Switching species resets that reference scale. The 3D view shows three gyroperiods and repeats; playback speed is independent of the physical gyroperiod. No electric field, drift, collisions, or magnetic mirrors are included.</div>
+</div></div></div>
+<script>
+(()=>{'use strict';
+const $=id=>document.getElementById(id),scene=$('scene'),cross=$('cross'),ctx=scene.getContext('2d'),cx=cross.getContext('2d');
+const ids=['vperp','field','vpar','persistence','speed'],ctl=Object.fromEntries([...ids,'species'].map(id=>[id,$(id)]));
+const PI=Math.PI,TAU=2*PI,e=1.602176634e-19,c0=299792458,masses={electron:9.1093837139e-31,proton:1.67262192369e-27,deuteron:3.3435837724e-27};
+const TURNS=3,END=TURNS*TAU,STEP=.035;
+let phase=0,trail=[],nextSample=STEP,yaw=-.75,tilt=.40,zoom=1,drag=null,paused=false,last=0;
+// A species-specific reference length is retained while velocities and B change.
+let referenceRadius=masses.deuteron*4e6/(e*2);
+function cfg(){
+ const mass=masses[ctl.species.value],sign=ctl.species.value==='electron'?-1:1;
+ const vp=+ctl.vperp.value*1e6,vpar=+ctl.vpar.value*1e6,B=+ctl.field.value;
+ const speed=Math.hypot(vp,vpar),gamma=1/Math.sqrt(1-(speed/c0)**2);
+ const energyEV=(gamma-1)*mass*c0*c0/e,omega=e*B/(gamma*mass);
+ const radius=vp/omega,period=TAU/omega,pitchLength=vpar*period;
+ return{mass,sign,energyEV,gamma,speed,B,vp,vpar,omega,radius,period,pitchLength};
+}
+function fmt(x,unit){if(x===0)return '0 '+unit;const a=Math.abs(x);if(a>=1e3)return (x/1e3).toPrecision(3)+' k'+unit;if(a>=1)return x.toPrecision(3)+' '+unit;if(a>=1e-3)return (x*1e3).toPrecision(3)+' m'+unit;if(a>=1e-6)return (x*1e6).toPrecision(3)+' μ'+unit;if(a>=1e-9)return (x*1e9).toPrecision(3)+' n'+unit;if(a>=1e-12)return (x*1e12).toPrecision(3)+' p'+unit;return x.toExponential(2)+' '+unit;}
+function labels(p){$('vperpVal').textContent=(p.vp/1e6).toFixed(1)+' Mm/s';$('vparVal').textContent=(p.vpar/1e6).toFixed(1)+' Mm/s';$('fieldVal').textContent=p.B.toFixed(1)+' T';$('speedVal').textContent=(+ctl.speed.value).toFixed(2)+'×';$('persistenceVal').textContent=+ctl.persistence.value===100?'Full':ctl.persistence.value+'%';
+ $('state').textContent=p.vp===0?'· PARALLEL':p.vpar===0?'· CIRCULAR':'· HELICAL';
+ $('readout').innerHTML='Gyro radius ρ = <b>'+fmt(p.radius,'m')+'</b><br>Gyro frequency f = <b>'+fmt(1/p.period,'Hz')+'</b><br>Gyroperiod T = <b>'+fmt(p.period,'s')+'</b><br>Distance along B per turn = <b>'+fmt(p.pitchLength,'m')+'</b><br>Kinetic energy = <b>'+fmt(p.energyEV,'eV')+'</b><br>Speed = <b>'+fmt(p.speed,'m/s')+'</b><br>v<sub>⊥</sub> = <b>'+fmt(p.vp,'m/s')+'</b><br>v<sub>∥</sub> = <b>'+fmt(p.vpar,'m/s')+'</b><br>Rotation looking along B: <b>'+(p.sign>0?'clockwise':'anticlockwise')+'</b>';
+}
+function resize(canvas,g){const box=canvas.getBoundingClientRect(),dpr=Math.min(2,devicePixelRatio||1),w=Math.max(1,Math.round(box.width*dpr)),h=Math.max(1,Math.round(box.height*dpr));if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}g.setTransform(dpr,0,0,dpr,0,0);return{w:box.width,h:box.height};}
+// Distances use metres. The same scale applies along and across the field.
+function position(t,p){return{x:p.radius*Math.cos(t),y:-p.sign*p.radius*Math.sin(t),z:p.vpar/p.omega*(t-END/2)};}
+function project(w,h,p){const cy=Math.cos(yaw),sy=Math.sin(yaw),ct=Math.cos(tilt),st=Math.sin(tilt);
+ const raw=v=>{let x=cy*v.x-sy*v.y,y=sy*v.x+cy*v.y;return{x,y:ct*v.z-st*y,depth:ct*y+st*v.z};};
+ let maxX=referenceRadius,maxY=referenceRadius;
+ for(let i=0;i<=180;i++){let v=raw(position(END*i/180,p));maxX=Math.max(maxX,Math.abs(v.x));maxY=Math.max(maxY,Math.abs(v.y));}
+ const base=Math.min(w/7,h/11)/referenceRadius;
+ const scale=Math.min(base,w*.43/maxX,h*.43/maxY)*zoom;
+ return v=>{let a=raw(v);return{x:w/2+a.x*scale,y:h/2-a.y*scale,depth:a.depth};};
+}
+function poly(g,points,color,width=1,dash=[]){if(points.length<2)return;g.beginPath();g.moveTo(points[0].x,points[0].y);for(let i=1;i<points.length;i++)g.lineTo(points[i].x,points[i].y);g.strokeStyle=color;g.lineWidth=width;g.setLineDash(dash);g.stroke();g.setLineDash([]);}
+function dot(g,v,color,r){g.beginPath();g.arc(v.x,v.y,r,0,TAU);g.fillStyle=color;g.shadowColor=color;g.shadowBlur=14;g.fill();g.shadowBlur=0;}
+function arrow(g,a,b,color,width=2){poly(g,[a,b],color,width);let th=Math.atan2(b.y-a.y,b.x-a.x),len=9;poly(g,[{x:b.x-len*Math.cos(th-.55),y:b.y-len*Math.sin(th-.55)},b,{x:b.x-len*Math.cos(th+.55),y:b.y-len*Math.sin(th+.55)}],color,width);}
+function visible(){if(+ctl.persistence.value===100)return trail;let age=(.18+ +ctl.persistence.value*.057)*TAU;let i=0;while(i<trail.length-1&&phase-trail[i]>age)i++;return trail.slice(Math.max(0,i-1));}
+function drawTrail(g,angles,point){if(angles.length<2)return;let bands=Math.min(32,angles.length-1),n=angles.length-1;
+ for(let b=0;b<bands;b++){let lo=Math.floor(n*b/bands),hi=Math.floor(n*(b+1)/bands);if(hi<=lo)continue;let a=.04+.90*((b+.5)/bands)**1.65;poly(g,angles.slice(lo,hi+1).map(point),`rgba(255,136,192,${a})`,2.8);}}
+function drawScene(p){let{w,h}=resize(scene,ctx);ctx.clearRect(0,0,w,h);let P=project(w,h,p),half=END*Math.abs(p.vpar)/p.omega/2+referenceRadius;
+ let base=P({x:0,y:0,z:-half}),top=P({x:0,y:0,z:half});arrow(ctx,base,top,'rgba(255,205,109,.85)',2);ctx.fillStyle='#ffcd6d';ctx.font='bold 13px system-ui';ctx.fillText('B',top.x+8,top.y-7);
+ const point=t=>P(position(t,p));let guide=[];for(let t=0;t<=END+STEP;t+=STEP)guide.push(point(Math.min(t,END)));poly(ctx,guide,'rgba(115,162,204,.28)',1.2,[4,6]);drawTrail(ctx,visible(),point);dot(ctx,point(phase),'#61d6ff',6);
+}
+function drawCross(p){let{w,h}=resize(cross,cx);cx.clearRect(0,0,w,h);let X=w/2,Y=h/2;
+ const scale=Math.min(w,h)*.17/Math.max(referenceRadius,p.radius/1.8),r=p.radius*scale;
+ cx.strokeStyle='rgba(255,205,109,.4)';cx.lineWidth=1.5;cx.setLineDash([4,5]);cx.beginPath();cx.arc(X,Y,referenceRadius*scale,0,TAU);cx.stroke();cx.setLineDash([]);
+ cx.beginPath();cx.arc(X,Y,r,0,TAU);cx.strokeStyle='rgba(255,136,192,.58)';cx.lineWidth=1.8;cx.stroke();
+ cx.fillStyle='#ffcd6d';cx.font='bold 18px system-ui';cx.fillText('⊙ B',14,28);cx.fillStyle='#bdcde0';cx.font='12px system-ui';cx.fillText('Guiding centre',X-43,Y-13);
+ dot(cx,{x:X,y:Y},'#ffcd6d',3);let px=X+r*Math.cos(phase),py=Y+r*p.sign*Math.sin(phase),tangent={x:-Math.sin(phase),y:p.sign*Math.cos(phase)};
+ if(r>10)arrow(cx,{x:px,y:py},{x:px+tangent.x*32,y:py+tangent.y*32},'#9adff2',2);
+ dot(cx,{x:px,y:py},'#61d6ff',6);cx.fillStyle='#a9bbd0';cx.font='12px system-ui';cx.fillText('v⊥',Math.min(w-36,px+tangent.x*35+4),Math.min(h-8,py+tangent.y*35-5));
+}
+function resetPath(){phase=0;trail=[0];nextSample=STEP;labels(cfg());}
+for(let id of [...ids,'species'])ctl[id].addEventListener('input',()=>{if(id==='species')referenceRadius=masses[ctl.species.value]*4e6/(e*2);if(['vperp','field','vpar','species'].includes(id))resetPath();else labels(cfg());});
+$('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'Play':'Pause';};$('resetPath').onclick=resetPath;$('resetView').onclick=()=>{yaw=-.75;tilt=.40;zoom=1;};
+scene.addEventListener('pointerdown',ev=>{drag={x:ev.clientX,y:ev.clientY};scene.setPointerCapture(ev.pointerId);});scene.addEventListener('pointermove',ev=>{if(!drag)return;yaw+=(ev.clientX-drag.x)*.009;tilt=Math.max(-1.48,Math.min(1.48,tilt+(ev.clientY-drag.y)*.009));drag={x:ev.clientX,y:ev.clientY};});scene.addEventListener('pointerup',()=>drag=null);scene.addEventListener('pointercancel',()=>drag=null);scene.addEventListener('wheel',ev=>{ev.preventDefault();zoom=Math.max(.5,Math.min(4,zoom*Math.exp(-ev.deltaY*.001)));},{passive:false});
+function frame(now){let dt=Math.min(.06,(now-last)/1000||0);last=now;let p=cfg();if(!paused){let next=phase+dt*+ctl.speed.value*3.7;if(next>=END){next%=END;trail=[0];nextSample=STEP;}phase=next;while(nextSample<=phase){trail.push(nextSample);nextSample+=STEP;}}drawScene(p);drawCross(p);requestAnimationFrame(frame);}resetPath();requestAnimationFrame(frame);
+})();
+</script></body></html>

@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Particle motion in Earth's magnetic field</title>
+<style>
+:root{color-scheme:dark;font:15px/1.5 system-ui,Arial,sans-serif;background:#091323;color:#e8f0fb}*{box-sizing:border-box}body{margin:0;padding:20px}main{max-width:1250px;margin:auto}h1{font-size:1.45rem;margin:0 0 5px}p{margin:0 0 15px;color:#b6c8dd}.layout{display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:16px}.scene,.panel{background:#101f35;border:1px solid #31445d;border-radius:14px;overflow:hidden}.scene{position:relative;min-height:560px}canvas{width:100%;height:560px;display:block;touch-action:none;cursor:grab}canvas:active{cursor:grabbing}.legend{position:absolute;left:13px;bottom:12px;padding:8px 11px;background:#0b172bdc;border-radius:9px;font-size:12px;color:#cad9e9}.legend b{color:#ffc27c}.panel{padding:18px}.panel h2{font-size:1rem;margin:0 0 16px}label{display:block;margin:16px 0 4px;font-weight:600}.readout{float:right;color:#78d8ff}input[type=range]{width:100%;accent-color:#52cfff}.hint{font-size:12px;color:#a5bcd3;margin:1px 0 7px}.check{display:flex;gap:9px;align-items:center;margin:12px 0;cursor:pointer}.check input{accent-color:#52cfff}select,button{background:#203955;border:1px solid #48627e;border-radius:7px;color:white;padding:8px 10px;font:inherit}select{width:100%}button{cursor:pointer;margin:12px 8px 0 0}button:hover{background:#315577}.stat{border-top:1px solid #344862;margin-top:17px;padding-top:12px;font-size:13px;line-height:1.8}.stat strong{color:#f9d49d}.note{font-size:12px;color:#b7c8dc;margin-top:14px}.key{font-weight:700}.cyan{color:#64daff}.gold{color:#ffc27c}.pink{color:#ff99ce}@media(max-width:750px){.layout{grid-template-columns:1fr}.scene{min-height:420px}canvas{height:420px}}
+</style>
+</head>
+<body>
+<main>
+<h1>A charged particle in Earth's magnetic field</h1>
+<p>Watch gyromotion, bouncing between magnetic mirrors, and slow drift around Earth. Drag the diagram to rotate the view.</p>
+<div class="layout">
+ <section class="scene" aria-label="Animated three-dimensional projection of a particle orbit around Earth"><canvas id="view"></canvas><div class="legend"><span class="key gold">●</span> particle &nbsp; <span class="key cyan">━</span> field line &nbsp; <span class="key pink">━</span> fading orbit<br>Drag to rotate · Orbit sizes and time scales are exaggerated.</div></section>
+ <aside class="panel">
+  <h2>Controls</h2>
+  <label for="pitch">Equatorial pitch angle <span class="readout" id="pitchValue"></span></label><input id="pitch" type="range" min="5" max="90" value="50" step="1"><div class="hint">Angle between velocity and the field at the equator</div>
+  <label for="shell">Field line (L shell) <span class="readout" id="shellValue"></span></label><input id="shell" type="range" min="2" max="5" step="0.1" value="3"><div class="hint">Equatorial distance in Earth radii</div>
+  <label for="charge">Particle charge</label><select id="charge"><option value="1">Positive (ion): westward drift</option><option value="-1">Negative (electron): eastward drift</option></select>
+  <label for="speed">Animation speed <span class="readout" id="speedValue"></span></label><input id="speed" type="range" min="0.25" max="3" step="0.25" value="1">
+  <label for="driftRate">Drift rate relative to bouncing <span class="readout" id="driftRateValue"></span></label><input id="driftRate" type="range" min="0" max="2" step="0.05" value="1"><div class="hint">Move left for bounces closer together around Earth</div>
+  <label for="persistence">Trajectory persistence <span class="readout" id="persistenceValue"></span></label><input id="persistence" type="range" min="0" max="100" step="1" value="50"><div class="hint">Older parts fade gradually; far right retains the full path</div>
+  <label class="check"><input id="grad" type="checkbox" checked><span><span class="cyan">■</span> Grad-B drift</span></label>
+  <label class="check"><input id="curve" type="checkbox" checked><span><span class="pink">■</span> Curvature drift</span></label>
+  <label class="check"><input id="gyro" type="checkbox" checked><span>Show gyromotion</span></label>
+  <button id="pause">Pause</button><button id="reset">Reset path</button><button id="resetView">Reset view</button>
+  <div class="stat"><div id="state"></div><div id="cone"></div><div id="mirror"></div><div id="direction"></div></div>
+  <div class="note">A dipole approximation to Earth's field. Gyromotion, bounce and drift are sped up independently; this is a teaching diagram, not an orbit calculation. The loss cone represents particles whose guiding centre reaches Earth rather than reflecting above it.</div>
+ </aside>
+</div>
+</main>
+<script>
+'use strict';
+const canvas=document.querySelector('#view'), ctx=canvas.getContext('2d');
+const els=Object.fromEntries(['pitch','shell','charge','speed','driftRate','persistence','grad','curve','gyro','pitchValue','shellValue','speedValue','driftRateValue','persistenceValue','state','cone','mirror','direction','pause','reset','resetView'].map(k=>[k,document.getElementById(k)]));
+let pitch=50,L=3,foot=0,mirror=0,loss=false,lat=0,sign=1,phi=0,gyrophase=0,history=[],paused=false,last=0,clock=0,losses=0;
+const rad=Math.PI/180, clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+const ratio=a=>Math.sqrt(1+3*Math.sin(a)**2)/Math.cos(a)**6;
+function calc(){
+ pitch=+els.pitch.value;L=+els.shell.value;foot=Math.acos(1/Math.sqrt(L));
+ const lossAngle=Math.asin(1/Math.sqrt(ratio(foot)))/rad;
+ loss=pitch<lossAngle-1e-8;
+ if(loss) mirror=foot; else {
+  let lo=0,hi=foot,target=1/Math.sin(pitch*rad)**2;
+  for(let i=0;i<55;i++){const mid=(lo+hi)/2;if(ratio(mid)>target)hi=mid;else lo=mid}mirror=(lo+hi)/2;
+ }
+ els.pitchValue.textContent=pitch+'°';els.shellValue.textContent=L.toFixed(1)+' R⊕';els.speedValue.textContent=Number(els.speed.value).toFixed(2)+'×';
+ els.cone.innerHTML=`Loss-cone angle: <strong>${lossAngle.toFixed(1)}°</strong> at equator`;
+ els.mirror.innerHTML=loss?'Mirror point: <strong>inside Earth</strong>':`Mirror latitude: <strong>±${(mirror/rad).toFixed(1)}°</strong>`;
+ els.state.innerHTML=loss?'Status: <strong>in loss cone — precipitates</strong>':'Status: <strong>trapped — bounces</strong>';
+ lat=0;sign=1;history=[];clock=0;losses=0;
+ }
+function point(a,p,lv=L){const c=Math.cos(a),r=lv*c*c,rho=r*c;return [rho*Math.cos(p),rho*Math.sin(p),r*Math.sin(a)]}
+function add(a,b){return a.map((x,i)=>x+b[i])}function scale(a,v){return a.map(x=>x*v)}
+function cross(a,b){return [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]]}
+function unit(a){return scale(a,1/Math.hypot(...a))}
+function particle(){
+ const pos=point(lat,phi),t=.0002;
+ // Field direction along the field line; local azimuth gives a perpendicular basis.
+ const b=unit(add(point(lat+t,phi),scale(point(lat-t,phi),-1)));
+ const az=[-Math.sin(phi),Math.cos(phi),0],other=unit(cross(b,az));
+ const localSin=Math.min(1,Math.sin(pitch*rad)*Math.sqrt(ratio(lat)));
+ const radius=els.gyro.checked ? .095*localSin : 0; // deliberately exaggerated
+ return add(pos,add(scale(az,radius*Math.cos(gyrophase)),scale(other,radius*Math.sin(gyrophase))));
+}
+let w=0,h=0,S=1,cx=0,cy=0;
+const initialYaw=.48,initialElev=.25;
+let yaw=initialYaw,elev=initialElev,dragging=false,dragX=0,dragY=0;
+function resize(){const rect=canvas.getBoundingClientRect(),d=window.devicePixelRatio||1;w=rect.width;h=rect.height;canvas.width=Math.round(w*d);canvas.height=Math.round(h*d);ctx.setTransform(d,0,0,d,0,0);S=Math.min(w/(2*6.2),h/(2*4.7));cx=w*.50;cy=h*.50}
+function proj(p){const c=Math.cos(yaw),s=Math.sin(yaw),ce=Math.cos(elev),se=Math.sin(elev);return [cx+S*(c*p[0]+s*p[1]),cy+S*(se*(-s*p[0]+c*p[1])-ce*p[2])]}
+function stroke(points,color,width=1,dash=[]){ctx.strokeStyle=color;ctx.lineWidth=width;ctx.setLineDash(dash);ctx.beginPath();points.forEach((p,i)=>{const q=proj(p);if(i)ctx.lineTo(...q);else ctx.moveTo(...q)});ctx.stroke();ctx.setLineDash([])}
+function line(a,b,color,width=1){ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...b);ctx.strokeStyle=color;ctx.lineWidth=width;ctx.stroke()}
+function arrowAt(p,dir,color,label){const a=proj(p),b=proj(add(p,scale(dir,.48)));line(a,b,color,2.5);const angle=Math.atan2(b[1]-a[1],b[0]-a[0]);line(b,[b[0]-10*Math.cos(angle-.48),b[1]-10*Math.sin(angle-.48)],color,2.5);line(b,[b[0]-10*Math.cos(angle+.48),b[1]-10*Math.sin(angle+.48)],color,2.5);ctx.fillStyle=color;ctx.font='12px system-ui';ctx.fillText(label,b[0]+6,b[1]-7)}
+function drawEarth(){
+ const rr=S;const glow=ctx.createRadialGradient(cx,cy,rr*.65,cx,cy,rr*1.75);glow.addColorStop(0,'#3187c04a');glow.addColorStop(1,'#3187c000');ctx.fillStyle=glow;ctx.beginPath();ctx.arc(cx,cy,rr*1.75,0,7);ctx.fill();
+ const g=ctx.createRadialGradient(cx-rr*.38,cy-rr*.45,rr*.08,cx,cy,rr*1.08);g.addColorStop(0,'#438abc');g.addColorStop(.67,'#1a568a');g.addColorStop(1,'#092447');ctx.fillStyle=g;ctx.beginPath();ctx.arc(cx,cy,rr,0,7);ctx.fill();ctx.strokeStyle='#81bce27d';ctx.lineWidth=1.5;ctx.stroke();
+ const equator=[];for(let i=0;i<=96;i++){const a=2*Math.PI*i/96;equator.push([Math.cos(a),Math.sin(a),0])}stroke(equator,'#5fa2bb5a');ctx.fillStyle='#d5eafa';ctx.font='bold 12px system-ui';ctx.textAlign='center';ctx.fillText('EARTH',cx,cy+4);ctx.textAlign='left';
+}
+function draw(){
+ ctx.clearRect(0,0,w,h);
+ const bg=ctx.createLinearGradient(0,0,0,h);bg.addColorStop(0,'#0a172d');bg.addColorStop(1,'#101c30');ctx.fillStyle=bg;ctx.fillRect(0,0,w,h);
+ // Several fixed meridian lines make the dipole shape apparent.
+ for(const p of [-1.55,-.85,0,.85,1.55])for(const shell of [2,3,4.5]){
+  const f=Math.acos(1/Math.sqrt(shell)),pts=[];for(let i=0;i<=90;i++)pts.push(point(-f+i*2*f/90,p,shell));
+  stroke(pts,'#42739c55',shell===3?1.3:1);
+ }
+ // Ring at the equator shows the direction of slow azimuthal drift.
+ const ring=[];for(let i=0;i<=120;i++)ring.push(point(0,2*Math.PI*i/120));stroke(ring,'#87a6cc55',1,[5,6]);
+ drawEarth();
+ // The instantaneous field line follows the particle as its drift carries it around Earth.
+ const pts=[];for(let i=0;i<=120;i++)pts.push(point(-foot+2*foot*i/120,phi));stroke(pts,'#65d9ffb9',2.5);
+ if(!loss){for(const a of [-mirror,mirror]){const q=proj(point(a,phi));ctx.fillStyle='#ffe69c';ctx.beginPath();ctx.arc(...q,4,0,7);ctx.fill()}}
+ if(history.length>1){const setting=+els.persistence.value,windowSeconds=setting===100?Infinity:.3+Math.pow(setting/99,2)*130;for(let i=1;i<history.length;i++){const age=clock-history[i].t;if(age>windowSeconds)continue;const alpha=setting===100?.72:.72*Math.pow(Math.max(0,1-age/windowSeconds),1.3);const a=proj(history[i-1].p),b=proj(history[i].p);line(a,b,`rgba(255,153,206,${alpha})`,2.1)}}
+ const p=particle(),q=proj(p),halo=ctx.createRadialGradient(...q,1,...q,19);halo.addColorStop(0,'#ffb665a0');halo.addColorStop(1,'#ffb66500');ctx.fillStyle=halo;ctx.beginPath();ctx.arc(...q,19,0,7);ctx.fill();ctx.fillStyle='#ffc27c';ctx.beginPath();ctx.arc(...q,6,0,7);ctx.fill();ctx.strokeStyle='white';ctx.lineWidth=1;ctx.stroke();
+ // Both drift contributions point in the same azimuthal direction for a dipole.
+ const az=scale([-Math.sin(phi),Math.cos(phi),0],-Number(els.charge.value));
+ if(els.grad.checked)arrowAt(point(0,phi+.24),az,'#65d9ff','∇B drift');
+ if(els.curve.checked)arrowAt(point(0,phi-.30),az,'#ff99ce','curvature drift');
+ ctx.fillStyle='#aec8e0';ctx.font='12px system-ui';const north=proj([0,0,1.16]),south=proj([0,0,-1.16]);ctx.fillText('N',...north);ctx.fillText('S',...south);
+ els.direction.innerHTML=`Drift: <strong>${(!els.grad.checked&&!els.curve.checked)?'off':(+els.charge.value===1?'westward (ion)':'eastward (electron)')}</strong>`;
+}
+function advance(dt){
+ if(paused)return;
+ const steps=Math.max(1,Math.ceil(dt*Number(els.speed.value)/.012));
+ const t=dt*Number(els.speed.value)/steps;
+ for(let k=0;k<steps;k++){
+  const sin2=Math.min(1,Math.sin(pitch*rad)**2*ratio(lat));
+  // Meridional arc length: ds/dλ = L cos(λ) sqrt(1+3 sin²(λ)).
+  const parallel=Math.sqrt(Math.max(0,1-sin2));
+  let dlat=sign*t*2.5*parallel/(L*Math.cos(lat)*Math.sqrt(1+3*Math.sin(lat)**2));
+  if(!loss && Math.abs(mirror)<.012)dlat=sign*t*.005;
+  lat+=dlat;
+  if(Math.abs(lat)>=mirror){
+   if(loss){losses++;lat=0;sign=losses%2?-1:1;history=[]}
+   else if(mirror<.0001){lat=0;sign*=-1}
+   else{lat=Math.sign(lat)*Math.max(0,2*mirror-Math.abs(lat));sign*=-1}
+  }
+  // Qualitative equatorial grad-B and curvature weights: v_perp²/2 and v_parallel².
+  const g=els.grad.checked?.5*sin2:0,c=els.curve.checked?1-sin2:0;
+  phi+=-Number(els.charge.value)*t*.33*(g+c)*Number(els.driftRate.value);
+  gyrophase+=t*24*Number(els.charge.value);
+  clock+=t;
+  history.push({p:particle(),t:clock});
+  if(history.length>12000)history.shift();
+ }
+ const setting=+els.persistence.value;
+ if(setting<100){const windowSeconds=.3+Math.pow(setting/99,2)*130;while(history.length>2 && clock-history[1].t>windowSeconds)history.shift()}
+}
+function frame(now){const dt=last?Math.min((now-last)/1000,.05):0;last=now;advance(dt);draw();requestAnimationFrame(frame)}
+for(const id of ['pitch','shell'])els[id].addEventListener('input',calc);
+els.speed.addEventListener('input',()=>els.speedValue.textContent=Number(els.speed.value).toFixed(2)+'×');
+els.driftRate.addEventListener('input',()=>els.driftRateValue.textContent=Number(els.driftRate.value).toFixed(2)+'×');
+function updatePersistence(){els.persistenceValue.textContent=+els.persistence.value===100?'Full':els.persistence.value+'%'}
+els.persistence.addEventListener('input',updatePersistence);
+els.reset.addEventListener('click',()=>{lat=0;sign=1;phi=0;gyrophase=0;history=[];clock=0;losses=0});
+els.resetView.addEventListener('click',()=>{yaw=initialYaw;elev=initialElev;draw()});
+canvas.addEventListener('pointerdown',e=>{dragging=true;dragX=e.clientX;dragY=e.clientY;canvas.setPointerCapture(e.pointerId)});
+canvas.addEventListener('pointermove',e=>{if(!dragging)return;yaw+=(e.clientX-dragX)*.008;elev=clamp(elev+(e.clientY-dragY)*.008,-Math.PI/2,Math.PI/2);dragX=e.clientX;dragY=e.clientY;draw()});
+canvas.addEventListener('pointerup',()=>dragging=false);
+canvas.addEventListener('pointercancel',()=>dragging=false);
+els.pause.addEventListener('click',()=>{paused=!paused;els.pause.textContent=paused?'Play':'Pause'});
+window.addEventListener('resize',resize);calc();updatePersistence();els.driftRateValue.textContent=Number(els.driftRate.value).toFixed(2)+'×';resize();requestAnimationFrame(frame);
+</script>
+</body>
+</html>

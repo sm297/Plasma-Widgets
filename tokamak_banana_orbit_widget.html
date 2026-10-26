@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tokamak banana orbits</title>
+<style>
+:root{color-scheme:dark;--bg:#0a1122;--panel:#14223a;--line:#344762;--text:#e9f1ff;--muted:#b0bed1;--blue:#61d6ff;--pink:#ff88c0;--gold:#ffcd6d}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}.wrap{max-width:1420px;margin:auto;padding:16px}h1{font-size:1.45rem;margin:0 0 4px}p{margin:4px 0 12px;color:var(--muted)}.grid{display:grid;grid-template-columns:minmax(390px,1fr) 310px;gap:14px}.visuals{display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:12px}section,.controls{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;min-width:0}h2{font-size:1rem;margin:0 0 7px}canvas{width:100%;display:block;border-radius:7px;background:#0b1730}#scene{height:540px;touch-action:none;cursor:grab}#scene:active{cursor:grabbing}#section{height:390px}.badge{color:var(--gold);font-weight:700}#readout{min-height:48px;margin:9px 0 0;color:var(--text)}.hint{font-size:12px;color:var(--muted);margin:7px 0 0}.control{margin:12px 0 17px}.control label{display:flex;justify-content:space-between;gap:8px}.value{color:var(--blue);white-space:nowrap}input[type=range]{width:100%;accent-color:var(--blue);margin:8px 0 0}select,button{background:#1b3654;color:var(--text);border:1px solid #527395;border-radius:6px;padding:6px 10px;font:inherit}select{width:100%;margin-top:6px}button{cursor:pointer;margin:5px 5px 0 0}button:hover{background:#255072}.legend{font-size:13px;color:var(--muted);margin-top:8px}.key{font-weight:700}.a{color:var(--blue)}.b{color:var(--pink)}.c{color:var(--gold)}.note{margin-top:12px;padding:11px 14px;background:#101f35;border-left:3px solid var(--gold);border-radius:5px;color:#cfdded;font-size:13px}@media(max-width:1120px){.grid{grid-template-columns:1fr}}@media(max-width:720px){.visuals{grid-template-columns:1fr}#scene{height:440px}#section{height:330px}.wrap{padding:10px}}
+</style>
+</head>
+<body><div class="wrap">
+<h1>Banana orbits in a tokamak</h1><p>A guiding centre trapped on the outboard (weak-field) side bounces between mirror points; its two drift-shifted legs form a banana in the poloidal cross-section.</p>
+<div class="grid"><div class="visuals"><section><h2>3D tokamak view <span class="badge" id="state"></span></h2><canvas id="scene" aria-label="Rotatable three-dimensional tokamak with animated particle orbit"></canvas><div class="legend"><span class="key a">●</span> particle &nbsp; <span class="key b">—</span> trajectory &nbsp; <span class="key c">○</span> magnetic axis / flux surface</div><div class="hint">Drag to rotate · scroll to zoom · projection is schematic.</div></section><section><h2>Poloidal cross-section</h2><canvas id="section" aria-label="Banana orbit in the tokamak poloidal cross-section"></canvas><div id="readout"></div><div class="hint">The toroidal direction points around the donut; this panel looks into a cut through it.</div></section></div>
+<div class="controls"><h2>Orbit and display</h2>
+<div class="control"><label for="pitch">Outboard pitch angle <span class="value" id="pitchVal"></span></label><input id="pitch" type="range" min="38" max="89" step="1" value="76"></div>
+<div class="control"><label for="aspect">Tokamak aspect ratio R₀/a <span class="value" id="aspectVal"></span></label><input id="aspect" type="range" min="2.6" max="5" step="0.1" value="3.2"></div>
+<div class="control"><label for="radius">Orbit surface r/a <span class="value" id="radiusVal"></span></label><input id="radius" type="range" min="0.32" max="0.82" step="0.01" value="0.62"></div>
+<div class="control"><label for="energy">Particle energy <span class="value" id="energyVal"></span></label><input id="energy" type="range" min="5" max="500" step="5" value="100"></div>
+<div class="control"><label for="field">On-axis toroidal field B₀ <span class="value" id="fieldVal"></span></label><input id="field" type="range" min="1" max="8" step="0.1" value="3"></div>
+<div class="control"><label for="safety">Safety factor q <span class="value" id="safetyVal"></span></label><input id="safety" type="range" min="1" max="5" step="0.1" value="3"></div>
+<div class="control"><label for="persistence">Trail persistence <span class="value" id="persistenceVal"></span></label><input id="persistence" type="range" min="1" max="100" step="1" value="32"></div>
+<div class="control"><label for="speed">Animation speed <span class="value" id="speedVal"></span></label><input id="speed" type="range" min="0.25" max="5" step="0.25" value="1.5"></div>
+<div class="control"><label for="species">Particle species</label><select id="species"><option value="deuteron">Deuteron (+)</option><option value="proton">Proton (+)</option><option value="electron">Electron (−)</option></select></div>
+<button id="pause">Pause</button><button id="resetPath">Reset path</button><button id="resetView">Reset view</button>
+<div class="note"><strong>Teaching model, not an orbit solver.</strong> Mirror points use B(θ)=B₀R₀/(R₀+r cos θ) and conservation of magnetic moment. Banana width uses the order-of-magnitude estimate Δ<sub>b</sub>≈qρ/√ε (ρ at the outboard equator, ε=r/R₀). The toroidal precession is a rough drift scaling, not a self-consistent neoclassical calculation. The orbit shape and time dependence are schematic; gyromotion is omitted. Major radius is fixed at R₀=3 m; trail history is capped.</div>
+</div></div></div>
+<script>
+(()=>{'use strict';
+const $=id=>document.getElementById(id), scene=$('scene'), cross=$('section'), sctx=scene.getContext('2d'), cctx=cross.getContext('2d');
+const ids=['pitch','aspect','radius','energy','field','safety','persistence','speed'];
+const ctl=Object.fromEntries([...ids,'species'].map(id=>[id,$(id)]));
+const pi=Math.PI, TAU=2*pi, elementaryCharge=1.602176634e-19;
+const masses={deuteron:3.3435837724e-27,proton:1.67262192369e-27,electron:9.1093837139e-31};
+let phase=0,nextSample=0,trail=[],yaw=-0.85,tilt=0.48,zoom=1,paused=false,last=0,drag=null;
+function config(){
+ const aspect=+ctl.aspect.value,a=1,R=aspect,r=+ctl.radius.value,eps=r/R,alpha=+ctl.pitch.value*pi/180,s=Math.sin(alpha)**2;
+ const crit=Math.asin(Math.sqrt((1-eps)/(1+eps))),trapped=alpha>crit;
+ const cosMirror=Math.max(-1,Math.min(1,((1+eps)*s-1)/eps)),mirror=trapped?Math.acos(cosMirror):pi;
+ const mass=masses[ctl.species.value],charge=ctl.species.value==='electron'?-1:1;
+ const energy=+ctl.energy.value*1000*elementaryCharge,B0=+ctl.field.value,Beq=B0/(1+eps),q=+ctl.safety.value;
+ const cLight=299792458,gamma=1+energy/(mass*cLight*cLight),v=cLight*Math.sqrt(1-1/(gamma*gamma));
+ const rho=gamma*mass*v*Math.sin(alpha)/(elementaryCharge*Beq);
+ const width=q*rho/Math.sqrt(eps)/(3/aspect); // Width in units of minor radius; R0 fixed to 3 m.
+ let bounce=0;
+ if(trapped){const N=160,du=pi/(2*N);for(let j=0;j<N;j++){
+  const u=(j+.5)*du,theta=mirror*Math.sin(u),B=B0/(1+eps*Math.cos(theta));
+  const parallelFraction=Math.max(1e-12,1-s*B/Beq);
+  bounce+=4*q*3*mirror*Math.cos(u)*du/(v*Math.sqrt(parallelFraction));
+ }}
+ const drift=charge*(gamma*mass*v*v/(elementaryCharge*Beq*3*3))*bounce;
+ return{R,a,r,eps,alpha,crit,trapped,mirror,width,physicalWidth:width*3/aspect,drift,charge,q,rho,bounce};
+}
+function orbit(t,c){let theta,rad,tor;
+ if(c.trapped){theta=c.mirror*Math.sin(t);rad=c.r+c.charge*c.width*.5*Math.cos(t);tor=c.q*theta+c.drift*t/TAU;}
+ else{theta=t;rad=c.r;tor=c.q*theta;}
+ const rr=c.R+rad*Math.cos(theta);return{x:rr*Math.cos(tor),y:rr*Math.sin(tor),z:rad*Math.sin(theta),rad,theta,tor};}
+function labels(c){
+ $('pitchVal').textContent=ctl.pitch.value+'°';$('aspectVal').textContent=(+ctl.aspect.value).toFixed(1);$('radiusVal').textContent=(+ctl.radius.value).toFixed(2);
+ $('energyVal').textContent=ctl.energy.value+' keV';$('fieldVal').textContent=(+ctl.field.value).toFixed(1)+' T';$('safetyVal').textContent=(+ctl.safety.value).toFixed(1);
+ $('persistenceVal').textContent=+ctl.persistence.value===100?'Full':ctl.persistence.value+'%';$('speedVal').textContent=(+ctl.speed.value).toFixed(2)+'×';
+ $('state').textContent=c.trapped?'· TRAPPED':'· PASSING';$('state').style.color=c.trapped?'#ffcd6d':'#61d6ff';
+ $('readout').innerHTML='Critical pitch: <b>'+(c.crit*180/pi).toFixed(1)+'°</b><br>'+(c.trapped?'Mirror angle: <b>±'+(c.mirror*180/pi).toFixed(1)+'°</b><br>Estimated banana width: <b>'+(100*c.physicalWidth).toFixed(1)+' cm</b><br>Estimated bounce period: <b>'+(1e6*c.bounce).toFixed(1)+' μs</b><br>Illustrative toroidal drift: <b>'+(180*c.drift/pi).toFixed(2)+'°/bounce</b>':'Passing: <b>no mirror points or banana width</b>')+'<br>Outboard gyroradius: <b>'+(1000*c.rho).toFixed(1)+' mm</b>'+(c.trapped&&c.r+c.width/2>1?'<br><span style="color:#ffcd6d">Orbit exceeds the drawn plasma edge: approximation breaks down.</span>':'');
+}
+function fit(canvas,ctx){const box=canvas.getBoundingClientRect(),dpr=Math.min(2,window.devicePixelRatio||1),w=Math.max(1,Math.round(box.width*dpr)),h=Math.max(1,Math.round(box.height*dpr));if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}ctx.setTransform(dpr,0,0,dpr,0,0);return{w:box.width,h:box.height};}
+function projector(w,h,c){const cy=Math.cos(yaw),sy=Math.sin(yaw),ct=Math.cos(tilt),st=Math.sin(tilt),scale=Math.min(w/(2.8*(c.R+c.a)),h/(2.6*(c.R+c.a)))*zoom;return p=>{let xx=cy*p.x-sy*p.y,yy=sy*p.x+cy*p.y,zz=p.z;return{x:w/2+xx*scale,y:h/2-(ct*zz-st*yy)*scale,depth:ct*yy+st*zz};};}
+function curve(ctx,points,color,lineWidth=1,dash=[]){if(points.length<2)return;ctx.beginPath();ctx.moveTo(points[0].x,points[0].y);for(let i=1;i<points.length;i++)ctx.lineTo(points[i].x,points[i].y);ctx.strokeStyle=color;ctx.lineWidth=lineWidth;ctx.setLineDash(dash);ctx.stroke();ctx.setLineDash([]);}
+function world(R,r,theta,phi){const d=R+r*Math.cos(theta);return{x:d*Math.cos(phi),y:d*Math.sin(phi),z:r*Math.sin(theta)};}
+function guides(ctx,P,c){const paths=[];for(const theta of [0,pi/2,pi,3*pi/2]){let pts=[];for(let j=0;j<=120;j++)pts.push(P(world(c.R,c.a,theta,TAU*j/120)));paths.push({pts,depth:pts.reduce((v,p)=>v+p.depth,0)/pts.length,color:'rgba(106,148,194,.35)',width:1});}
+ for(let j=0;j<12;j++){let phi=TAU*j/12,pts=[];for(let k=0;k<=64;k++)pts.push(P(world(c.R,c.a,TAU*k/64,phi)));paths.push({pts,depth:pts.reduce((v,p)=>v+p.depth,0)/pts.length,color:'rgba(110,148,187,.28)',width:1});}
+ let axis=[];for(let j=0;j<=160;j++)axis.push(P(world(c.R,0,0,TAU*j/160)));paths.push({pts:axis,depth:0,color:'rgba(255,205,109,.55)',width:1.4});
+ // A single helical field-line guide shows why the bounce also moves toroidally.
+ let field=[];for(let j=0;j<=360;j++){let theta=TAU*j/180;field.push(P(world(c.R,c.r,theta,c.q*theta)));}paths.push({pts:field,depth:0,color:'rgba(86,209,255,.38)',width:1.2});
+ paths.sort((a,b)=>a.depth-b.depth);for(const item of paths)curve(ctx,item.pts,item.color,item.width);}
+function visibleTrail(){if(!trail.length)return [];if(+ctl.persistence.value===100)return trail;const maxAge=(.5+ +ctl.persistence.value*.31)*TAU;let i=trail.length-1;while(i>0&&phase-trail[i].t<maxAge)i--;return trail.slice(i);}
+function trailDraw(ctx,points,P){if(points.length<2)return;const projected=points.map(v=>P(v.p)),n=projected.length-1,bands=18;for(let b=0;b<bands;b++){let start=Math.floor(b*n/bands),end=Math.floor((b+1)*n/bands);if(end<=start)continue;let u=(b+.5)/bands,alpha=+ctl.persistence.value===100?(.19+.72*u*u):(.04+.83*u*u);curve(ctx,projected.slice(start,end+1),`rgba(255,130,193,${alpha})`,2.4);}}
+function dot(ctx,p,color,r){ctx.beginPath();ctx.arc(p.x,p.y,r,0,TAU);ctx.fillStyle=color;ctx.shadowBlur=16;ctx.shadowColor=color;ctx.fill();ctx.shadowBlur=0;}
+function drawScene(c){let {w,h}=fit(scene,sctx);sctx.clearRect(0,0,w,h);const P=projector(w,h,c);guides(sctx,P,c);trailDraw(sctx,visibleTrail(),P);let p=P(orbit(phase,c));dot(sctx,p,'#65dbff',6);}
+function drawCross(c){let {w,h}=fit(cross,cctx);cctx.clearRect(0,0,w,h);let scale=Math.min(w/(2.25*c.a),h/(2.6*c.a)),cx=w*.51,cy=h*.51;const Q=p=>({x:cx+(p.rad*Math.cos(p.theta))*scale,y:cy-p.rad*Math.sin(p.theta)*scale});
+ cctx.beginPath();cctx.arc(cx,cy,c.a*scale,0,TAU);cctx.fillStyle='rgba(52,90,130,.15)';cctx.fill();cctx.strokeStyle='#526b84';cctx.lineWidth=1.5;cctx.stroke();cctx.beginPath();cctx.arc(cx,cy,c.r*scale,0,TAU);cctx.setLineDash([4,5]);cctx.strokeStyle='rgba(255,205,109,.52)';cctx.stroke();cctx.setLineDash([]);
+ cctx.fillStyle='#8da4bd';cctx.font='12px system-ui';cctx.fillText('inboard: high B',8,17);cctx.fillText('outboard: low B',w-121,17);cctx.fillText('magnetic axis',cx-43,cy-9);
+ let path=[];let N=c.trapped?260:320;for(let j=0;j<=N;j++)path.push(Q(orbit(c.trapped?TAU*j/N:TAU*j/N,c)));curve(cctx,path,'rgba(255,136,192,.88)',2.2);if(c.trapped){for(const th of [-c.mirror,c.mirror]){dot(cctx,Q({rad:c.r,theta:th}),'#ffcd6d',3.5);}}
+ dot(cctx,Q(orbit(phase,c)),'#65dbff',5);cctx.fillStyle='#cad9ea';cctx.font='12px system-ui';cctx.fillText('R →',w-39,h-10);}
+function resetPath(){phase=0;nextSample=0;trail=[];let c=config();trail.push({t:0,p:orbit(0,c)});nextSample=.055;labels(c);}
+for(let id of [...ids,'species'])ctl[id].addEventListener('input',()=>{if(['pitch','aspect','radius','energy','field','safety','species'].includes(id))resetPath();else labels(config());});
+$('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'Play':'Pause';};$('resetPath').onclick=resetPath;$('resetView').onclick=()=>{yaw=-.85;tilt=.48;zoom=1;};
+scene.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY};scene.setPointerCapture(e.pointerId);});scene.addEventListener('pointermove',e=>{if(!drag)return;yaw+=(e.clientX-drag.x)*.008;tilt=Math.max(-1.5,Math.min(1.5,tilt+(e.clientY-drag.y)*.008));drag={x:e.clientX,y:e.clientY};});scene.addEventListener('pointerup',()=>drag=null);scene.addEventListener('pointercancel',()=>drag=null);scene.addEventListener('wheel',e=>{e.preventDefault();zoom=Math.max(.55,Math.min(2,zoom*Math.exp(-e.deltaY*.001)));},{passive:false});
+function frame(now){let dt=Math.min(.055,(now-last)/1000||0);last=now;let c=config();if(!paused){phase+=dt*+ctl.speed.value*1.8;while(nextSample<=phase){trail.push({t:nextSample,p:orbit(nextSample,c)});nextSample+=.055;}if(trail.length>24000)trail.splice(0,trail.length-24000);}drawScene(c);drawCross(c);requestAnimationFrame(frame);}resetPath();requestAnimationFrame(frame);
+})();
+</script></body></html>
