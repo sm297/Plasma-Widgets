@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Convective Derivative Explorer</title>
+<style>
+  :root { --ink:#18212f; --muted:#5c6878; --line:#d9e1ea; --blue:#2878d0; --orange:#e07a2f; --green:#15966f; --red:#c84b5b; --bg:#f6f8fb; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif; color:var(--ink); background:var(--bg); }
+  main { max-width:1180px; margin:0 auto; padding:28px 18px 36px; }
+  h1 { margin:0 0 6px; font-size:clamp(1.7rem,3vw,2.35rem); }
+  .subtitle { margin:0 0 22px; color:var(--muted); max-width:780px; line-height:1.45; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:14px; box-shadow:0 5px 20px #162c4610; padding:18px; }
+  .controls { display:grid; grid-template-columns: repeat(4,minmax(145px,1fr)); gap:14px; align-items:end; }
+  .controls > :first-child { grid-column:span 2; }
+  label { display:block; font-size:.79rem; font-weight:700; color:var(--muted); margin-bottom:6px; }
+  select, input[type=range] { width:100%; }
+  select { height:34px; border:1px solid #cbd5e1; border-radius:7px; padding:0 8px; background:white; color:var(--ink); }
+  input[type=range] { accent-color:var(--blue); }
+  .value { font-variant-numeric:tabular-nums; color:var(--ink); font-weight:600; }
+  button { height:34px; border:0; border-radius:7px; padding:0 15px; background:var(--blue); color:white; font-weight:700; cursor:pointer; }
+  button:hover { filter:brightness(.95); }
+  .equation { margin:17px 0 0; background:#f1f5f9; border-radius:9px; padding:12px 14px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; line-height:1.55; overflow:auto; }
+  .equation strong { color:var(--blue); }
+  .figure { margin-top:16px; display:grid; grid-template-columns:1fr; gap:12px; }
+  .panel { border:1px solid var(--line); border-radius:10px; padding:8px 10px 5px; background:#fff; }
+  .panel-title { display:flex; justify-content:space-between; align-items:baseline; padding:2px 3px 5px; font-size:.9rem; font-weight:750; }
+  .legend { display:flex; gap:14px; font-size:.75rem; color:var(--muted); font-weight:500; }
+  .key { display:inline-flex; align-items:center; gap:4px; }
+  .swatch { width:18px; height:3px; border-radius:2px; display:inline-block; }
+  svg { display:block; width:100%; height:auto; }
+  .explanation { margin-top:14px; padding:14px 16px; border-left:4px solid var(--blue); background:#eef6ff; border-radius:0 9px 9px 0; line-height:1.5; }
+  .explanation b { color:#145b9d; }
+  .note { margin-top:12px; color:var(--muted); font-size:.82rem; }
+  .readout { display:flex; flex-wrap:wrap; gap:8px; margin:0 10px 12px 48px; font-size:.8rem; font-variant-numeric:tabular-nums; }
+  .readout span { padding:5px 8px; border-radius:6px; background:#f1f5f9; white-space:nowrap; }
+  .panel-title,.legend { flex-wrap:wrap; }
+  .extra-control[hidden], .sea-panel[hidden] { display:none; }
+  .sea-caption { color:var(--muted); font-size:.85rem; line-height:1.5; margin:4px 10px 9px; }
+  .sea-caption b { color:var(--ink); }
+  @media (max-width:850px) { .controls { grid-template-columns:1fr 1fr; } .controls > :first-child { grid-column:1/-1; } .controls > :last-child { grid-column:1/-1; } }
+  @media (max-width:520px) { .controls { grid-template-columns:1fr; } .controls > :first-child,.controls > :last-child { grid-column:auto; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Convective derivative explorer</h1>
+  <p class="subtitle">Follow a Gaussian scalar profile in one-dimensional flow. Compare a fixed observer with a moving water parcel. The radioactive-plume example adds spreading and decay.</p>
+
+  <section class="card">
+    <div class="controls">
+      <div>
+        <label for="example">Example</label>
+        <select id="example">
+          <option value="steady">1 · Steady Gaussian in the lab frame</option>
+          <option value="moving">2 · Rigid profile moving with the fluid</option>
+          <option value="changing">3 · Profile changing while advected</option>
+          <option value="plume">4 · Radioactive plume: spreading + decay</option>
+        </select>
+      </div>
+      <div><label for="u">Flow speed U <span class="value" id="uVal"></span></label><input id="u" type="range" min="-2" max="2" step="0.05" value="0.8"></div>
+      <div><label for="time">Time t <span class="value" id="timeVal"></span></label><input id="time" type="range" min="0" max="8" step="0.05" value="2"></div>
+      <div><label for="sigma">Width σ <span class="value" id="sigmaVal"></span></label><input id="sigma" type="range" min="0.35" max="2.5" step="0.05" value="1"></div>
+      <div class="extra-control" id="growthControl"><label for="alpha">Growth α <span class="value" id="alphaVal"></span></label><input id="alpha" type="range" min="-0.12" max="0.25" step="0.01" value="0.1"></div>
+      <div class="extra-control" id="diffusionControl" hidden><label for="diffusion">Spreading D <span class="value" id="diffusionVal"></span></label><input id="diffusion" type="range" min="0" max="0.6" step="0.01" value="0.22"></div>
+      <div class="extra-control" id="decayControl" hidden><label for="decay">Decay rate λ <span class="value" id="decayVal"></span></label><input id="decay" type="range" min="0" max="0.6" step="0.01" value="0.18"></div>
+      <div><label>&nbsp;</label><button id="play">▶ Play</button></div>
+    </div>
+    <div class="equation" id="equation"></div>
+  </section>
+
+  <section class="figure">
+    <div class="panel sea-panel" id="seaPanel" hidden>
+      <div class="panel-title"><span>Release into the sea · plan-view illustration</span><span class="legend"><span class="key"><i class="swatch" style="background:#f7b24a"></i>radioactivity</span><span class="key"><i class="swatch" style="background:var(--orange)"></i>water parcel</span><span class="key"><i class="swatch" style="background:var(--red)"></i>stationary probe</span></span></div>
+      <svg id="sea" viewBox="0 0 900 230" role="img" aria-label="Illustration of a plume advecting, spreading and decaying in the sea"></svg>
+      <p class="sea-caption" id="seaCaption"></p>
+    </div>
+    <div class="panel">
+      <div class="panel-title"><span>Scalar field q(x,t)</span><span class="legend"><span class="key"><i class="swatch" style="background:var(--blue)"></i>profile</span><span class="key"><i class="swatch" style="background:var(--orange)"></i>fluid parcel</span><span class="key"><i class="swatch" style="background:var(--red)"></i>fixed probe</span></span></div>
+      <svg id="field" viewBox="0 0 900 290" role="img" aria-label="Scalar field plot"></svg>
+    </div>
+    <div class="panel">
+      <div class="panel-title"><span>Derivative terms across space (dots mark the parcel)</span><span class="legend"><span class="key"><i class="swatch" style="background:var(--blue)"></i>∂q/∂t</span><span class="key"><i class="swatch" style="background:var(--orange)"></i>U ∂q/∂x</span><span class="key"><i class="swatch" style="background:var(--green)"></i>Dq/Dt</span></span></div>
+      <svg id="terms" viewBox="0 0 900 270" role="img" aria-label="Spatial derivative curves"></svg>
+      <div class="readout" id="readout" aria-live="polite"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title"><span>What the parcel measures: q(x<sub>p</sub>(t),t)</span><span class="legend"><span class="key"><i class="swatch" style="background:var(--orange)"></i>parcel history</span></span></div>
+      <svg id="history" viewBox="0 0 900 220" role="img" aria-label="Parcel history plot"></svg>
+    </div>
+  </section>
+  <div class="explanation" id="explanation"></div>
+  <div class="note">The orange parcel starts one initial width left of the release point: x<sub>p</sub>(t)=x₀−σ+Ut, with x₀=−3. The red probe stays at x=x₀. Adjusting σ selects a new initial parcel. The plume is a one-dimensional, unbounded advection–diffusion–decay model; the plan view is illustrative.</div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const fieldSvg = $('field'), termsSvg = $('terms'), historySvg = $('history');
+const colors = {blue:'#2878d0', orange:'#e07a2f', green:'#15966f', red:'#c84b5b', grid:'#d9e1ea', text:'#5c6878'};
+const x0=-3, xProbe=x0;
+let playing=false, timer;
+function fmt(v){ return Number(v).toFixed(2).replace('-0.00','0.00'); }
+function state(){ return {ex:$('example').value,U:+$('u').value,t:+$('time').value,sigma:+$('sigma').value,alpha:+$('alpha').value,D:+$('diffusion').value,lambda:+$('decay').value}; }
+function parcelX(t,s){ return x0-s.sigma+s.U*t; }
+function width(t,s){ return Math.sqrt(s.sigma*s.sigma+(s.ex==='plume'?2*s.D*t:0)); }
+function model(x,t,s){
+  const center=x0+(s.ex==='steady'?0:s.U*t), xi=x-center;
+  const w=width(t,s), base=Math.exp(-xi*xi/(2*w*w));
+  const A=s.ex==='changing' ? 1+s.alpha*t : s.ex==='plume' ? s.sigma/w*Math.exp(-s.lambda*t) : 1;
+  const q=A*base, qx=-xi*q/(w*w);
+  const source=s.ex==='plume' ? s.D*q*(xi*xi/(w*w*w*w)-1/(w*w))-s.lambda*q : s.ex==='changing' ? s.alpha*base : 0;
+  const qt=s.ex==='steady' ? 0 : -s.U*qx+source;
+  return {q,qt,qx,material:qt+s.U*qx};
+}
+function spatialRange(s){
+  if(s.ex==='plume'){
+    const margin=3*width(8,s), end=x0+8*s.U;
+    return [Math.min(-10,x0-margin,end-margin,parcelX(0,s)-1),
+            Math.max(10,x0+margin,end+margin,parcelX(8,s)+1)];
+  }
+  const center=x0+(s.ex==='steady'?0:s.U*s.t), xp=parcelX(s.t,s), margin=3*width(s.t,s);
+  return [Math.min(-10,center-margin,xp-margin),Math.max(10,center+margin,xp+margin)];
+}
+function pathFor(fn, xr, yr, W=900,H=290, pad={l:48,r:18,t:16,b:31}, n=260){
+  let d=''; for(let i=0;i<n;i++){let x=xr[0]+(xr[1]-xr[0])*i/(n-1), y=fn(x); let X=pad.l+(x-xr[0])/(xr[1]-xr[0])*(W-pad.l-pad.r); let Y=pad.t+(yr[1]-y)/(yr[1]-yr[0])*(H-pad.t-pad.b); d+=(i?'L':'M')+X.toFixed(2)+','+Y.toFixed(2);} return d;
+}
+function axes(xr,yr,W,H,pad, xLabel='x', yLabel=''){
+  const X=x=>pad.l+(x-xr[0])/(xr[1]-xr[0])*(W-pad.l-pad.r), Y=y=>pad.t+(yr[1]-y)/(yr[1]-yr[0])*(H-pad.t-pad.b);
+  let s=`<g stroke="${colors.grid}" stroke-width="1" fill="none">`;
+  [xr[0],0,xr[1]].forEach(v=>{if(v>=xr[0]&&v<=xr[1])s+=`<line x1="${X(v)}" y1="${pad.t}" x2="${X(v)}" y2="${H-pad.b}"/>`;});
+  [yr[0],0,yr[1]].forEach(v=>s+=`<line x1="${pad.l}" y1="${Y(v)}" x2="${W-pad.r}" y2="${Y(v)}"/>`); s+='</g>';
+  s+=`<g fill="${colors.text}" font-size="12" font-family="system-ui"><text x="${W/2}" y="${H-4}" text-anchor="middle">${xLabel}</text><text x="14" y="${H/2}" transform="rotate(-90 14 ${H/2})" text-anchor="middle">${yLabel}</text>`;
+  [xr[0],0,xr[1]].forEach(v=>{if(v>=xr[0]&&v<=xr[1])s+=`<text x="${X(v)}" y="${H-13}" text-anchor="middle">${v}</text>`;}); s+=`<text x="${pad.l-8}" y="${Y(yr[1])+4}" text-anchor="end">${fmt(yr[1])}</text><text x="${pad.l-8}" y="${Y(0)+4}" text-anchor="end">0</text><text x="${pad.l-8}" y="${Y(yr[0])+4}" text-anchor="end">${fmt(yr[0])}</text></g>`; return {s,X,Y};
+}
+function circle(X,Y,r,fill,stroke='white'){return `<circle cx="${X}" cy="${Y}" r="${r}" fill="${fill}" stroke="${stroke}" stroke-width="2"/>`;}
+function render(){
+  const s=state(); $('uVal').textContent=fmt(s.U); $('timeVal').textContent=fmt(s.t); $('sigmaVal').textContent=fmt(s.sigma); $('alphaVal').textContent=fmt(s.alpha);
+  $('diffusionVal').textContent=fmt(s.D); $('decayVal').textContent=fmt(s.lambda);
+  $('growthControl').hidden=s.ex!=='changing';
+  $('diffusionControl').hidden=s.ex!=='plume'; $('decayControl').hidden=s.ex!=='plume'; $('seaPanel').hidden=s.ex!=='plume';
+  const movingX=parcelX(s.t,s), xr=spatialRange(s), parcel=model(movingX,s.t,s);
+  let title,eq,desc;
+  if(s.ex==='steady'){ title='Steady Gaussian in the lab frame'; eq='q(x,t)=exp(−(x−x₀)²/(2σ²)),   ∂q/∂t=0,   Dq/Dt=U ∂q/∂x'; desc='<b>Example 1:</b> The Gaussian stays fixed. A fixed observer sees no time change, but the orange parcel crosses the spatial gradient. The orange and green derivative curves coincide.'; }
+  if(s.ex==='moving'){ title='Rigid Gaussian moving with the fluid'; eq='q(x,t)=exp(−(x−x₀−Ut)²/(2σ²)),   ∂q/∂t=−U ∂q/∂x,   Dq/Dt=0'; desc='<b>Example 2:</b> The Gaussian passes the fixed probe while the parcel rides with it. The blue and orange derivative curves cancel everywhere; the green curve and parcel history are flat.'; }
+  if(s.ex==='changing'){ title='Advected Gaussian with changing amplitude'; eq='q=A(t) exp(−(x−x₀−Ut)²/(2σ²)),   A(t)=1+αt,   Dq/Dt=α exp(−(x−x₀−Ut)²/(2σ²))'; desc='<b>Example 3:</b> The Gaussian travels with the fluid while its amplitude changes. The blue and orange curves no longer cancel: their sum (green) is the change a moving parcel experiences.'; }
+  if(s.ex==='plume'){ title='Radioactive release into a moving sea'; eq='q(x,t)=(σ/w) exp(−λt) exp(−(x−x₀−Ut)²/(2w²)),   w²=σ²+2Dt'; desc='<b>Radioactive plume:</b> The current carries the release, spreading broadens and lowers the peak, and decay reduces the total activity. Follow the orange water parcel: Dq/Dt = D ∂²q/∂x² − λq. The blue and orange terms account for motion; what remains in green is local spreading plus radioactive decay. At a given parcel, spreading can initially increase activity if it sits on the plume edge.'; }
+  $('equation').innerHTML=`<strong>${title}</strong><br>${eq}<br><span style="color:${colors.text}">${s.ex==='plume'?'Dq/Dt = ∂q/∂t + U ∂q/∂x = D ∂²q/∂x² − λq':'Dq/Dt = ∂q/∂t + U ∂q/∂x'}</span>`; $('explanation').innerHTML=desc;
+  if(s.ex==='plume')drawSea(s,xr,movingX);
+  drawField(s,movingX,xr); drawTerms(s,movingX,xr,parcel); drawHistory(s);
+}
+function drawSea(s,xr,xp){
+  const X=x=>35+(x-xr[0])/(xr[1]-xr[0])*830, center=X(x0+s.U*s.t), initial=X(x0);
+  const rx=(width(s.t,s)/(xr[1]-xr[0]))*830, ry=38, parcelY=115;
+  const brightness=Math.exp(-s.lambda*s.t), peak=s.sigma/width(s.t,s)*brightness;
+  let html=`<defs><radialGradient id="plumeGlow"><stop offset="0%" stop-color="#ffc458" stop-opacity="${(.92*brightness).toFixed(3)}"/><stop offset="48%" stop-color="#ff8a3d" stop-opacity="${(.65*brightness).toFixed(3)}"/><stop offset="100%" stop-color="#f67f39" stop-opacity="0"/></radialGradient><pattern id="waves" width="85" height="44" patternUnits="userSpaceOnUse"><path d="M0 22 Q20 13 42 22 T85 22" stroke="#b1e4eb" stroke-opacity=".28" stroke-width="2" fill="none"/></pattern></defs>`;
+  html+=`<rect x="8" y="13" width="884" height="190" rx="12" fill="#176786"/><rect x="8" y="13" width="884" height="190" rx="12" fill="url(#waves)"/>`;
+  html+=`<ellipse cx="${initial}" cy="115" rx="${(s.sigma/(xr[1]-xr[0])*830).toFixed(1)}" ry="38" fill="none" stroke="#ddf1f2" stroke-dasharray="5 5" stroke-width="2" opacity=".8"/>`;
+  html+=`<ellipse cx="${center}" cy="115" rx="${(3*rx).toFixed(1)}" ry="${3*ry}" fill="url(#plumeGlow)"/>`;
+  html+=`<path d="M${X(xProbe)} 30 V188" stroke="${colors.red}" stroke-width="2" stroke-dasharray="5 4"/>`;
+  html+=circle(X(xProbe),115,6,colors.red)+circle(X(xp),parcelY,8,colors.orange);
+  html+=`<path d="M${X(xp)} 115 L${center} 115" stroke="white" stroke-width="1" stroke-dasharray="3 4" opacity=".7"/>`;
+  html+=`<text x="${Math.min(760,Math.max(24,X(xProbe)+9))}" y="35" fill="white" font-size="13">fixed probe</text>`;
+  html+=`<text x="${Math.min(765,Math.max(20,X(xp)+10))}" y="${parcelY-13}" fill="white" font-size="13">water parcel</text>`;
+  html+=`<text x="35" y="190" fill="white" font-size="13">${s.U<0?'←':'→'} current U = ${fmt(s.U)}</text>`;
+  html+=`<text x="855" y="190" fill="white" font-size="13" text-anchor="end">dashed ring: initial width</text>`;
+  $('sea').innerHTML=html;
+  $('seaCaption').innerHTML=`Current shifts the centre to <b>x₀ + Ut = ${fmt(x0+s.U*s.t)}</b>. Spreading broadens the width from <b>${fmt(s.sigma)}</b> to <b>${fmt(width(s.t,s))}</b>; decay leaves <b>${fmt(100*brightness)}%</b> of total activity (in this 1D model). Peak q = <b>${fmt(peak)}</b>. The sea view is illustrative; the curves below show the exact 1D model.`;
+}
+function drawField(s,movingX,xr){
+  const W=900,H=290,p={l:55,r:18,t:16,b:31};
+  const maxAmplitude=s.ex==='changing'?Math.max(1,1+s.alpha*Number($('time').max)):1;
+  const upper=1.18*maxAmplitude, yr=[-.09*upper,upper], a=axes(xr,yr,W,H,p,'x','q');
+  let html=a.s+`<path d="${pathFor(x=>model(x,s.t,s).q,xr,yr,W,H,p)}" fill="none" stroke="${colors.blue}" stroke-width="3"/>`;
+  const X=a.X,Y=a.Y; html+=circle(X(xProbe),Y(model(xProbe,s.t,s).q),5,colors.red)+circle(X(movingX),Y(model(movingX,s.t,s).q),6,colors.orange);
+  html+=`<text x="${X(xProbe)+8}" y="${Y(model(xProbe,s.t,s).q)-9}" fill="${colors.red}" font-size="12">fixed probe</text><text x="${X(movingX)+8}" y="${Y(model(movingX,s.t,s).q)-10}" fill="${colors.orange}" font-size="12">parcel</text>`; fieldSvg.innerHTML=html;
+}
+function drawTerms(s,xp,xr,pv){
+  const W=900,H=270,p={l:55,r:18,t:16,b:31};
+  const terms=[{label:'∂q/∂t',color:colors.blue,fn:m=>m.qt,val:pv.qt},
+    {label:'U ∂q/∂x',color:colors.orange,fn:m=>s.U*m.qx,val:s.U*pv.qx},
+    {label:'Dq/Dt',color:colors.green,fn:m=>m.material,val:pv.material}];
+  let peak=0;
+  for(let i=0;i<=350;i++){ const x=xr[0]+(xr[1]-xr[0])*i/350, m=model(x,s.t,s); for(const term of terms)peak=Math.max(peak,Math.abs(term.fn(m))); }
+  const limit=Math.max(.08,peak*1.22), yr=[-limit,limit], a=axes(xr,yr,W,H,p,'x','derivative');
+  let html=a.s+`<line x1="${a.X(xp)}" y1="${p.t}" x2="${a.X(xp)}" y2="${H-p.b}" stroke="${colors.orange}" stroke-width="1.5" stroke-dasharray="5 5" opacity=".7"/>`;
+  for(const term of terms){
+    html+=`<path d="${pathFor(x=>term.fn(model(x,s.t,s)),xr,yr,W,H,p)}" fill="none" stroke="${term.color}" stroke-width="3"/>`;
+    html+=circle(a.X(xp),a.Y(term.val),5,term.color);
+  }
+  termsSvg.innerHTML=html;
+  $('readout').innerHTML=terms.map(term=>`<span style="color:${term.color}">${term.label} at parcel = <b>${fmt(term.val)}</b></span>`).join('');
+}
+function drawHistory(s){
+  const W=900,H=220,p={l:55,r:18,t:16,b:31}, history=t=>model(parcelX(t,s),t,s).q;
+  const samples=Array.from({length:161},(_,i)=>history(i/20));
+  const lo=s.ex==='plume'?0:Math.max(0,Math.min(...samples)-.12);
+  const hi=s.ex==='plume'?1.12:Math.max(...samples)+.12;
+  const yr=[lo===0?-.08:lo,hi], a=axes([0,8],yr,W,H,p,'time','q');
+  let html=a.s+`<path d="${pathFor(history,[0,8],yr,W,H,p)}" fill="none" stroke="${colors.orange}" stroke-width="3"/>`;
+  html+=circle(a.X(s.t),a.Y(history(s.t)),6,colors.orange); historySvg.innerHTML=html;
+}
+['example','u','time','sigma','alpha','diffusion','decay'].forEach(id=>$(id).addEventListener('input',render));
+$('play').addEventListener('click',()=>{playing=!playing; $('play').textContent=playing?'❚❚ Pause':'▶ Play'; if(playing){timer=setInterval(()=>{let v=+$('time').value+.05; if(v>8)v=0; $('time').value=v; render();},50);}else clearInterval(timer);});
+render();
+</script>
+</body>
+</html>
